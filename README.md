@@ -11,13 +11,15 @@
   <img alt="export" src="https://img.shields.io/badge/export-PNG-facc15">
 </p>
 
-Pixel Paint Studio is a small portfolio-ready pixel-art editor built with Rust and macroquad. It focuses on a polished desktop-tool feel: responsive layout, palette workflow, history stack, shape tools and PNG export.
+Pixel Paint Studio is a portfolio-ready pixel-art editor built with Rust and macroquad. It now opens with a project setup screen, lets you choose canvas presets and background mode, then gives you a fuller Paint-style workspace with palette workflow, history stack, shape tools and PNG export.
 
 ## Features
 
-- 48x48 pixel canvas with optional grid.
-- Brush, eraser, bucket fill, color picker, line and rectangle tools.
+- Startup project setup with 16x16, 32x32, 48x48, 64x64, 96x64 and 128x128 presets.
+- Transparent, white or dark canvas background.
+- Brush, eraser, bucket fill, color picker, line, rectangle, ellipse, spray, mirror and dither tools.
 - Palette with current-color preview.
+- New project, clear, grid, undo and redo actions in the UI.
 - Undo/redo history.
 - PNG export to the local `exports/` folder.
 - Responsive windowed UI with a neon tool-studio style.
@@ -33,12 +35,14 @@ cargo run --release
 ```text
 B / E / F      brush, eraser, fill
 I / L / R      picker, line, rectangle
+O / S / M / D  ellipse, spray, mirror, dither
+Ctrl+N         new project setup
 Ctrl+Z / Y     undo, redo
 Ctrl+S         export PNG
 G              toggle grid
 [ / ]          brush size
 Delete         clear canvas
-Shift+Rect     filled rectangle
+Shift+Shape    filled rectangle or ellipse
 ```
 
 ## Build

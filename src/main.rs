@@ -4,15 +4,52 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use image::{ImageBuffer, Rgba};
 use macroquad::prelude::*;
 
-const CANVAS_W: usize = 48;
-const CANVAS_H: usize = 48;
 const HISTORY_LIMIT: usize = 80;
+
+const PRESETS: [CanvasPreset; 6] = [
+    CanvasPreset {
+        name: "Icon",
+        width: 16,
+        height: 16,
+        note: "tiny app icons",
+    },
+    CanvasPreset {
+        name: "Sprite",
+        width: 32,
+        height: 32,
+        note: "game assets",
+    },
+    CanvasPreset {
+        name: "Pixel Art",
+        width: 48,
+        height: 48,
+        note: "balanced canvas",
+    },
+    CanvasPreset {
+        name: "Avatar",
+        width: 64,
+        height: 64,
+        note: "profile image",
+    },
+    CanvasPreset {
+        name: "Banner",
+        width: 96,
+        height: 64,
+        note: "wide artwork",
+    },
+    CanvasPreset {
+        name: "Large",
+        width: 128,
+        height: 128,
+        note: "detailed piece",
+    },
+];
 
 fn window_conf() -> Conf {
     Conf {
         window_title: "Pixel Paint Studio".to_owned(),
-        window_width: 1180,
-        window_height: 780,
+        window_width: 1240,
+        window_height: 820,
         high_dpi: true,
         sample_count: 4,
         window_resizable: true,
@@ -25,11 +62,18 @@ async fn main() {
     let mut app = App::new();
 
     loop {
-        let layout = Layout::new();
-        app.update(&layout);
-        app.draw(&layout);
+        app.update();
+        app.draw();
         next_frame().await;
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CanvasPreset {
+    name: &'static str,
+    width: usize,
+    height: usize,
+    note: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -62,6 +106,37 @@ impl Pixel {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CanvasBackground {
+    Transparent,
+    White,
+    Dark,
+}
+
+impl CanvasBackground {
+    const ALL: [CanvasBackground; 3] = [
+        CanvasBackground::Transparent,
+        CanvasBackground::White,
+        CanvasBackground::Dark,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            CanvasBackground::Transparent => "Transparent",
+            CanvasBackground::White => "White",
+            CanvasBackground::Dark => "Dark",
+        }
+    }
+
+    fn pixel(self) -> Pixel {
+        match self {
+            CanvasBackground::Transparent => Pixel::TRANSPARENT,
+            CanvasBackground::White => Pixel::rgb(255, 255, 255),
+            CanvasBackground::Dark => Pixel::rgb(20, 20, 31),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tool {
     Brush,
     Eraser,
@@ -69,16 +144,24 @@ enum Tool {
     Picker,
     Line,
     Rect,
+    Ellipse,
+    Spray,
+    Mirror,
+    Dither,
 }
 
 impl Tool {
-    const ALL: [Tool; 6] = [
+    const ALL: [Tool; 10] = [
         Tool::Brush,
         Tool::Eraser,
         Tool::Fill,
         Tool::Picker,
         Tool::Line,
         Tool::Rect,
+        Tool::Ellipse,
+        Tool::Spray,
+        Tool::Mirror,
+        Tool::Dither,
     ];
 
     fn label(self) -> &'static str {
@@ -89,6 +172,10 @@ impl Tool {
             Tool::Picker => "Picker",
             Tool::Line => "Line",
             Tool::Rect => "Rect",
+            Tool::Ellipse => "Ellipse",
+            Tool::Spray => "Spray",
+            Tool::Mirror => "Mirror",
+            Tool::Dither => "Dither",
         }
     }
 
@@ -100,6 +187,33 @@ impl Tool {
             Tool::Picker => "I",
             Tool::Line => "L",
             Tool::Rect => "R",
+            Tool::Ellipse => "O",
+            Tool::Spray => "S",
+            Tool::Mirror => "M",
+            Tool::Dither => "D",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AppMode {
+    Setup,
+    Editor,
+}
+
+#[derive(Clone, Debug)]
+struct SetupState {
+    preset_index: usize,
+    background: CanvasBackground,
+    demo_art: bool,
+}
+
+impl Default for SetupState {
+    fn default() -> Self {
+        Self {
+            preset_index: 2,
+            background: CanvasBackground::Transparent,
+            demo_art: false,
         }
     }
 }
@@ -110,61 +224,92 @@ struct Layout {
     right: Rect,
     canvas: Rect,
     export_button: Rect,
+    new_button: Rect,
+    undo_button: Rect,
+    redo_button: Rect,
+    grid_button: Rect,
     clear_button: Rect,
     cell: f32,
     ui_scale: f32,
+    canvas_w: usize,
+    canvas_h: usize,
 }
 
 impl Layout {
-    fn new() -> Self {
+    fn new(canvas_w: usize, canvas_h: usize) -> Self {
         let sw = screen_width();
         let sh = screen_height();
-        let ui_scale = (sw / 1180.0).min(sh / 780.0).clamp(0.72, 1.25);
+        let ui_scale = (sw / 1240.0).min(sh / 820.0).clamp(0.72, 1.22);
         let margin = 22.0 * ui_scale;
-        let top = 86.0 * ui_scale;
-        let left_w = 150.0 * ui_scale;
-        let right_w = 248.0 * ui_scale;
+        let top = 88.0 * ui_scale;
+        let left_w = 172.0 * ui_scale;
+        let right_w = 272.0 * ui_scale;
         let gap = 24.0 * ui_scale;
         let available_w = sw - margin * 2.0 - left_w - right_w - gap * 2.0;
-        let available_h = sh - top - margin;
-        let cell = (available_w / CANVAS_W as f32)
-            .min(available_h / CANVAS_H as f32)
+        let available_h = sh - top - margin - 26.0 * ui_scale;
+        let cell = (available_w / canvas_w as f32)
+            .min(available_h / canvas_h as f32)
             .floor()
-            .clamp(5.0, 18.0);
-        let canvas_w = cell * CANVAS_W as f32;
-        let canvas_h = cell * CANVAS_H as f32;
-        let total_w = left_w + gap + canvas_w + gap + right_w;
+            .clamp(4.0, 18.0);
+        let canvas_px_w = cell * canvas_w as f32;
+        let canvas_px_h = cell * canvas_h as f32;
+        let total_w = left_w + gap + canvas_px_w + gap + right_w;
         let start_x = (sw - total_w) * 0.5;
         let canvas_x = start_x + left_w + gap;
-        let canvas_y = top + (available_h - canvas_h) * 0.5;
-        let left = Rect::new(start_x, canvas_y, left_w, canvas_h);
-        let right = Rect::new(canvas_x + canvas_w + gap, canvas_y, right_w, canvas_h);
-        let export_button = Rect::new(
-            right.x + 18.0 * ui_scale,
-            right.y + right.h - 96.0 * ui_scale,
-            right.w - 36.0 * ui_scale,
-            38.0 * ui_scale,
-        );
-        let clear_button = Rect::new(
-            right.x + 18.0 * ui_scale,
-            right.y + right.h - 50.0 * ui_scale,
-            right.w - 36.0 * ui_scale,
-            32.0 * ui_scale,
-        );
+        let canvas_y = top + (available_h - canvas_px_h) * 0.5;
+        let panel_h = canvas_px_h.max(560.0 * ui_scale).min(available_h);
+        let panel_y = top + (available_h - panel_h) * 0.5;
+        let left = Rect::new(start_x, panel_y, left_w, panel_h);
+        let right = Rect::new(canvas_x + canvas_px_w + gap, panel_y, right_w, panel_h);
+        let action_x = right.x + 18.0 * ui_scale;
+        let action_w = right.w - 36.0 * ui_scale;
+        let row_w = (action_w - 10.0 * ui_scale) * 0.5;
+        let bottom = right.y + right.h;
 
         Self {
             left,
             right,
-            canvas: Rect::new(canvas_x, canvas_y, canvas_w, canvas_h),
-            export_button,
-            clear_button,
+            canvas: Rect::new(canvas_x, canvas_y, canvas_px_w, canvas_px_h),
+            export_button: Rect::new(
+                action_x,
+                bottom - 184.0 * ui_scale,
+                action_w,
+                38.0 * ui_scale,
+            ),
+            new_button: Rect::new(
+                action_x,
+                bottom - 138.0 * ui_scale,
+                action_w,
+                34.0 * ui_scale,
+            ),
+            undo_button: Rect::new(action_x, bottom - 96.0 * ui_scale, row_w, 32.0 * ui_scale),
+            redo_button: Rect::new(
+                action_x + row_w + 10.0 * ui_scale,
+                bottom - 96.0 * ui_scale,
+                row_w,
+                32.0 * ui_scale,
+            ),
+            grid_button: Rect::new(action_x, bottom - 56.0 * ui_scale, row_w, 32.0 * ui_scale),
+            clear_button: Rect::new(
+                action_x + row_w + 10.0 * ui_scale,
+                bottom - 56.0 * ui_scale,
+                row_w,
+                32.0 * ui_scale,
+            ),
             cell,
             ui_scale,
+            canvas_w,
+            canvas_h,
         }
     }
 }
 
 struct App {
+    mode: AppMode,
+    setup: SetupState,
+    width: usize,
+    height: usize,
+    background: CanvasBackground,
     pixels: Vec<Pixel>,
     undo: Vec<Vec<Pixel>>,
     redo: Vec<Vec<Pixel>>,
@@ -178,6 +323,7 @@ struct App {
     drag_start: Option<(usize, usize)>,
     status: String,
     status_until: f64,
+    tick: u64,
 }
 
 impl App {
@@ -205,8 +351,13 @@ impl App {
             Pixel::rgb(34, 17, 43),
         ];
 
-        let mut app = Self {
-            pixels: vec![Pixel::TRANSPARENT; CANVAS_W * CANVAS_H],
+        Self {
+            mode: AppMode::Setup,
+            setup: SetupState::default(),
+            width: 48,
+            height: 48,
+            background: CanvasBackground::Transparent,
+            pixels: vec![Pixel::TRANSPARENT; 48 * 48],
             undo: Vec::new(),
             redo: Vec::new(),
             palette,
@@ -219,41 +370,295 @@ impl App {
             drag_start: None,
             status: "Ready".to_owned(),
             status_until: get_time() + 2.0,
-        };
-        app.seed_demo_art();
-        app
+            tick: 0,
+        }
+    }
+
+    fn update(&mut self) {
+        self.tick = self.tick.wrapping_add(1);
+        match self.mode {
+            AppMode::Setup => self.update_setup(),
+            AppMode::Editor => {
+                let layout = Layout::new(self.width, self.height);
+                self.update_editor(&layout);
+            }
+        }
+    }
+
+    fn draw(&self) {
+        draw_background();
+        match self.mode {
+            AppMode::Setup => self.draw_setup(),
+            AppMode::Editor => {
+                let layout = Layout::new(self.width, self.height);
+                draw_title(
+                    layout.ui_scale,
+                    "PIXEL PAINT STUDIO",
+                    "full pixel-art paint workspace",
+                );
+                draw_panel(layout.left, Color::new(0.055, 0.052, 0.078, 0.88));
+                draw_panel(layout.right, Color::new(0.055, 0.052, 0.078, 0.88));
+                self.draw_toolbar(&layout);
+                self.draw_canvas(&layout);
+                self.draw_palette(&layout);
+                self.draw_status(&layout);
+            }
+        }
+    }
+
+    fn update_setup(&mut self) {
+        if is_key_pressed(KeyCode::Key1) {
+            self.setup.preset_index = 0;
+        }
+        if is_key_pressed(KeyCode::Key2) {
+            self.setup.preset_index = 1;
+        }
+        if is_key_pressed(KeyCode::Key3) {
+            self.setup.preset_index = 2;
+        }
+        if is_key_pressed(KeyCode::Key4) {
+            self.setup.preset_index = 3;
+        }
+        if is_key_pressed(KeyCode::Key5) {
+            self.setup.preset_index = 4;
+        }
+        if is_key_pressed(KeyCode::Key6) {
+            self.setup.preset_index = 5;
+        }
+        if is_key_pressed(KeyCode::Left) {
+            self.setup.preset_index = self.setup.preset_index.saturating_sub(1);
+        }
+        if is_key_pressed(KeyCode::Right) {
+            self.setup.preset_index = (self.setup.preset_index + 1).min(PRESETS.len() - 1);
+        }
+        if is_key_pressed(KeyCode::Space) {
+            self.setup.demo_art = !self.setup.demo_art;
+        }
+        if is_key_pressed(KeyCode::Enter) {
+            self.create_project_from_setup();
+        }
+
+        if is_mouse_button_pressed(MouseButton::Left) {
+            let mouse = mouse_vec();
+            for index in 0..PRESETS.len() {
+                if setup_preset_rect(index, self.setup_scale()).contains(mouse) {
+                    self.setup.preset_index = index;
+                    return;
+                }
+            }
+            for (index, background) in CanvasBackground::ALL.iter().enumerate() {
+                if setup_background_rect(index, self.setup_scale()).contains(mouse) {
+                    self.setup.background = *background;
+                    return;
+                }
+            }
+            if setup_demo_rect(self.setup_scale()).contains(mouse) {
+                self.setup.demo_art = !self.setup.demo_art;
+                return;
+            }
+            if setup_create_rect(self.setup_scale()).contains(mouse) {
+                self.create_project_from_setup();
+            }
+        }
+    }
+
+    fn draw_setup(&self) {
+        let scale = self.setup_scale();
+        draw_title(
+            scale,
+            "PIXEL PAINT STUDIO",
+            "create a canvas, choose a background, start painting",
+        );
+
+        let panel = setup_panel_rect(scale);
+        draw_panel(panel, Color::new(0.055, 0.052, 0.078, 0.91));
+        draw_section_label(
+            "NEW PROJECT",
+            panel.x + 32.0 * scale,
+            panel.y + 46.0 * scale,
+            scale,
+        );
+
+        for (index, preset) in PRESETS.iter().enumerate() {
+            let rect = setup_preset_rect(index, scale);
+            let active = index == self.setup.preset_index;
+            let accent = if active {
+                Color::new(1.0, 0.82, 0.28, 1.0)
+            } else {
+                Color::new(0.32, 0.38, 0.48, 1.0)
+            };
+            draw_rectangle(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                if active {
+                    Color::new(0.13, 0.115, 0.075, 0.92)
+                } else {
+                    Color::new(0.025, 0.028, 0.042, 0.78)
+                },
+            );
+            draw_rectangle(rect.x, rect.y, 4.0 * scale, rect.h, accent);
+            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, fade(accent, 0.55));
+            draw_text_line(
+                preset.name,
+                rect.x + 18.0 * scale,
+                rect.y + 27.0 * scale,
+                18.0 * scale,
+                Color::new(0.95, 0.9, 0.66, 1.0),
+            );
+            draw_text_line(
+                &format!("{} x {}", preset.width, preset.height),
+                rect.x + 18.0 * scale,
+                rect.y + 54.0 * scale,
+                20.0 * scale,
+                Color::new(0.78, 0.93, 1.0, 1.0),
+            );
+            draw_text_line(
+                preset.note,
+                rect.x + 18.0 * scale,
+                rect.y + 78.0 * scale,
+                12.0 * scale,
+                Color::new(0.58, 0.64, 0.72, 1.0),
+            );
+        }
+
+        let selected = PRESETS[self.setup.preset_index];
+        draw_section_label(
+            "BACKGROUND",
+            panel.x + 32.0 * scale,
+            panel.y + 376.0 * scale,
+            scale,
+        );
+        for (index, background) in CanvasBackground::ALL.iter().enumerate() {
+            let rect = setup_background_rect(index, scale);
+            let active = *background == self.setup.background;
+            draw_button(rect, background.label(), active, scale);
+        }
+        draw_button(
+            setup_demo_rect(scale),
+            if self.setup.demo_art {
+                "Demo art: ON"
+            } else {
+                "Demo art: OFF"
+            },
+            self.setup.demo_art,
+            scale,
+        );
+
+        let preview = Rect::new(
+            panel.x + panel.w - 252.0 * scale,
+            panel.y + 118.0 * scale,
+            180.0 * scale,
+            180.0 * scale,
+        );
+        self.draw_setup_preview(preview, selected, self.setup.background);
+        draw_text_line(
+            "Canvas preview",
+            preview.x,
+            preview.y - 14.0 * scale,
+            13.0 * scale,
+            Color::new(0.58, 0.64, 0.72, 1.0),
+        );
+
+        draw_button(setup_create_rect(scale), "Create Canvas", true, scale);
+    }
+
+    fn draw_setup_preview(&self, rect: Rect, preset: CanvasPreset, background: CanvasBackground) {
+        glow_rect(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            Color::new(1.0, 0.82, 0.28, 1.0),
+            0.065,
+        );
+        draw_rectangle(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            Color::new(0.02, 0.021, 0.032, 0.96),
+        );
+        let cell = (rect.w / preset.width as f32)
+            .min(rect.h / preset.height as f32)
+            .floor()
+            .max(1.0);
+        let w = cell * preset.width as f32;
+        let h = cell * preset.height as f32;
+        let x0 = rect.x + (rect.w - w) * 0.5;
+        let y0 = rect.y + (rect.h - h) * 0.5;
+        for y in 0..preset.height {
+            for x in 0..preset.width {
+                let px = x0 + x as f32 * cell;
+                let py = y0 + y as f32 * cell;
+                draw_rectangle(px, py, cell, cell, checker_color(x, y, background));
+            }
+        }
+        draw_rectangle_lines(x0, y0, w, h, 2.0, Color::new(0.92, 0.67, 0.28, 0.55));
+    }
+
+    fn setup_scale(&self) -> f32 {
+        (screen_width() / 1240.0)
+            .min(screen_height() / 820.0)
+            .clamp(0.72, 1.18)
+    }
+
+    fn create_project_from_setup(&mut self) {
+        let preset = PRESETS[self.setup.preset_index];
+        self.width = preset.width;
+        self.height = preset.height;
+        self.background = self.setup.background;
+        self.pixels = vec![self.background.pixel(); self.width * self.height];
+        self.undo.clear();
+        self.redo.clear();
+        self.tool = Tool::Brush;
+        self.show_grid = true;
+        self.brush_size = 1;
+        self.mode = AppMode::Editor;
+        self.status = format!("Created {} x {} canvas", self.width, self.height);
+        self.status_until = get_time() + 2.4;
+        if self.setup.demo_art {
+            self.seed_demo_art();
+        }
     }
 
     fn seed_demo_art(&mut self) {
+        if self.width < 16 || self.height < 16 {
+            return;
+        }
+
         let yellow = Pixel::rgb(255, 216, 64);
         let cyan = Pixel::rgb(88, 230, 255);
         let pink = Pixel::rgb(255, 72, 91);
         let purple = Pixel::rgb(189, 115, 255);
         let green = Pixel::rgb(97, 242, 116);
+        let base_y = self.height.saturating_sub(8);
+        let base_x = self.width / 2;
 
-        for y in 31..45 {
-            for x in 14..18 {
+        for y in base_y..self.height {
+            for x in base_x.saturating_sub(10)..base_x.saturating_sub(6) {
                 self.set_raw(x, y, yellow);
             }
         }
-        for y in 34..45 {
-            self.set_raw(18, y, pink);
-            self.set_raw(19, y, pink);
+        for y in base_y.saturating_sub(6)..self.height {
+            self.set_raw(base_x.saturating_sub(3), y, pink);
+            self.set_raw(base_x.saturating_sub(2), y, pink);
         }
-        for y in 28..45 {
-            self.set_raw(27, y, cyan);
+        for y in base_y.saturating_sub(10)..self.height {
+            self.set_raw((base_x + 8).min(self.width - 1), y, cyan);
         }
-        for x in 22..31 {
-            self.set_raw(x, 42, purple);
-            self.set_raw(x, 43, purple);
+        for x in base_x.saturating_sub(1)..(base_x + 7).min(self.width) {
+            self.set_raw(x, base_y.saturating_sub(1), purple);
+            self.set_raw(x, base_y.min(self.height - 1), purple);
         }
-        for x in 8..13 {
-            self.set_raw(x, 38, green);
-            self.set_raw(x, 39, green);
+        for x in base_x.saturating_sub(18)..base_x.saturating_sub(13) {
+            self.set_raw(x, base_y.saturating_add(2).min(self.height - 1), green);
+            self.set_raw(x, base_y.saturating_add(3).min(self.height - 1), green);
         }
     }
 
-    fn update(&mut self, layout: &Layout) {
+    fn update_editor(&mut self, layout: &Layout) {
         self.handle_keyboard();
 
         let mouse = mouse_vec();
@@ -264,12 +669,7 @@ impl App {
             if self.handle_palette_click(layout, mouse) {
                 return;
             }
-            if layout.export_button.contains(mouse) {
-                self.export_png();
-                return;
-            }
-            if layout.clear_button.contains(mouse) {
-                self.clear_canvas();
+            if self.handle_action_click(layout, mouse) {
                 return;
             }
         }
@@ -293,6 +693,10 @@ impl App {
         let ctrl = is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl);
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
 
+        if ctrl && is_key_pressed(KeyCode::N) {
+            self.mode = AppMode::Setup;
+            return;
+        }
         if ctrl && is_key_pressed(KeyCode::Z) {
             if shift {
                 self.redo();
@@ -307,23 +711,35 @@ impl App {
             self.export_png();
         }
 
-        if is_key_pressed(KeyCode::B) {
+        if !ctrl && is_key_pressed(KeyCode::B) {
             self.select_tool(Tool::Brush);
         }
-        if is_key_pressed(KeyCode::E) {
+        if !ctrl && is_key_pressed(KeyCode::E) {
             self.select_tool(Tool::Eraser);
         }
-        if is_key_pressed(KeyCode::F) {
+        if !ctrl && is_key_pressed(KeyCode::F) {
             self.select_tool(Tool::Fill);
         }
-        if is_key_pressed(KeyCode::I) {
+        if !ctrl && is_key_pressed(KeyCode::I) {
             self.select_tool(Tool::Picker);
         }
-        if is_key_pressed(KeyCode::L) {
+        if !ctrl && is_key_pressed(KeyCode::L) {
             self.select_tool(Tool::Line);
         }
-        if is_key_pressed(KeyCode::R) {
+        if !ctrl && is_key_pressed(KeyCode::R) {
             self.select_tool(Tool::Rect);
+        }
+        if !ctrl && is_key_pressed(KeyCode::O) {
+            self.select_tool(Tool::Ellipse);
+        }
+        if !ctrl && is_key_pressed(KeyCode::S) {
+            self.select_tool(Tool::Spray);
+        }
+        if !ctrl && is_key_pressed(KeyCode::M) {
+            self.select_tool(Tool::Mirror);
+        }
+        if !ctrl && is_key_pressed(KeyCode::D) {
+            self.select_tool(Tool::Dither);
         }
         if is_key_pressed(KeyCode::G) {
             self.show_grid = !self.show_grid;
@@ -338,7 +754,7 @@ impl App {
             self.flash(&format!("Brush {}px", self.brush_size));
         }
         if is_key_pressed(KeyCode::RightBracket) {
-            self.brush_size = (self.brush_size + 1).min(5);
+            self.brush_size = (self.brush_size + 1).min(8);
             self.flash(&format!("Brush {}px", self.brush_size));
         }
         if is_key_pressed(KeyCode::Delete) {
@@ -368,13 +784,46 @@ impl App {
         false
     }
 
+    fn handle_action_click(&mut self, layout: &Layout, mouse: Vec2) -> bool {
+        if layout.export_button.contains(mouse) {
+            self.export_png();
+            return true;
+        }
+        if layout.new_button.contains(mouse) {
+            self.mode = AppMode::Setup;
+            return true;
+        }
+        if layout.undo_button.contains(mouse) {
+            self.undo();
+            return true;
+        }
+        if layout.redo_button.contains(mouse) {
+            self.redo();
+            return true;
+        }
+        if layout.grid_button.contains(mouse) {
+            self.show_grid = !self.show_grid;
+            self.flash(if self.show_grid {
+                "Grid on"
+            } else {
+                "Grid off"
+            });
+            return true;
+        }
+        if layout.clear_button.contains(mouse) {
+            self.clear_canvas();
+            return true;
+        }
+        false
+    }
+
     fn begin_canvas_action(&mut self, cell: Option<(usize, usize)>) {
         let Some((x, y)) = cell else {
             return;
         };
 
         match self.tool {
-            Tool::Brush | Tool::Eraser => {
+            Tool::Brush | Tool::Eraser | Tool::Mirror | Tool::Dither | Tool::Spray => {
                 self.push_undo();
                 self.drawing_stroke = true;
                 self.last_cell = Some((x, y));
@@ -393,7 +842,7 @@ impl App {
                     self.flash("Picked color");
                 }
             }
-            Tool::Line | Tool::Rect => {
+            Tool::Line | Tool::Rect | Tool::Ellipse => {
                 self.drag_start = Some((x, y));
             }
         }
@@ -407,8 +856,16 @@ impl App {
             return;
         };
 
-        if let Some((last_x, last_y)) = self.last_cell {
-            self.draw_line(last_x, last_y, x, y, self.tool_pixel());
+        if self.tool == Tool::Spray {
+            self.paint_cell(x, y);
+            self.last_cell = Some((x, y));
+            return;
+        }
+
+        if let Some(last) = self.last_cell {
+            for (sx, sy) in line_cells(last, (x, y)) {
+                self.paint_cell(sx, sy);
+            }
         } else {
             self.paint_cell(x, y);
         }
@@ -427,40 +884,22 @@ impl App {
         };
 
         self.push_undo();
+        let filled = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
         match self.tool {
-            Tool::Line => {
-                self.draw_line(start.0, start.1, end.0, end.1, self.current);
-            }
-            Tool::Rect => {
-                let filled = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
-                self.draw_rect(start, end, self.current, filled);
-            }
+            Tool::Line => self.draw_line(start, end, self.current),
+            Tool::Rect => self.draw_rect(start, end, self.current, filled),
+            Tool::Ellipse => self.draw_ellipse(start, end, self.current, filled),
             _ => {}
         }
     }
 
-    fn draw(&self, layout: &Layout) {
-        draw_background();
-        draw_title(layout.ui_scale);
-        draw_panel(layout.left, Color::new(0.055, 0.052, 0.078, 0.88));
-        draw_panel(layout.right, Color::new(0.055, 0.052, 0.078, 0.88));
-        self.draw_toolbar(layout);
-        self.draw_canvas(layout);
-        self.draw_palette(layout);
-        self.draw_status(layout);
-    }
-
     fn draw_toolbar(&self, layout: &Layout) {
         let scale = layout.ui_scale;
-        draw_text_ex(
+        draw_section_label(
             "TOOLS",
             layout.left.x + 18.0 * scale,
             layout.left.y + 30.0 * scale,
-            TextParams {
-                font_size: (18.0 * scale) as u16,
-                color: Color::new(0.62, 0.91, 1.0, 1.0),
-                ..Default::default()
-            },
+            scale,
         );
 
         for (index, tool) in Tool::ALL.iter().enumerate() {
@@ -484,47 +923,35 @@ impl App {
             );
             draw_rectangle(rect.x, rect.y, 4.0 * scale, rect.h, accent);
             draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, fade(accent, 0.55));
-            draw_text_ex(
+            draw_text_line(
                 tool.key(),
-                rect.x + 14.0 * scale,
-                rect.y + 25.0 * scale,
-                TextParams {
-                    font_size: (18.0 * scale) as u16,
-                    color: Color::new(0.95, 0.9, 0.66, 1.0),
-                    ..Default::default()
-                },
+                rect.x + 13.0 * scale,
+                rect.y + 23.0 * scale,
+                16.0 * scale,
+                Color::new(0.95, 0.9, 0.66, 1.0),
             );
-            draw_text_ex(
+            draw_text_line(
                 tool.label(),
-                rect.x + 42.0 * scale,
-                rect.y + 25.0 * scale,
-                TextParams {
-                    font_size: (15.0 * scale) as u16,
-                    color: Color::new(0.78, 0.87, 0.93, 1.0),
-                    ..Default::default()
-                },
+                rect.x + 40.0 * scale,
+                rect.y + 23.0 * scale,
+                14.0 * scale,
+                Color::new(0.78, 0.87, 0.93, 1.0),
             );
         }
 
-        draw_text_ex(
+        draw_text_line(
             "BRUSH",
             layout.left.x + 18.0 * scale,
             layout.left.y + layout.left.h - 82.0 * scale,
-            TextParams {
-                font_size: (13.0 * scale) as u16,
-                color: Color::new(0.55, 0.6, 0.68, 1.0),
-                ..Default::default()
-            },
+            13.0 * scale,
+            Color::new(0.55, 0.6, 0.68, 1.0),
         );
-        draw_text_ex(
+        draw_text_line(
             &format!("{} px", self.brush_size),
             layout.left.x + 18.0 * scale,
             layout.left.y + layout.left.h - 48.0 * scale,
-            TextParams {
-                font_size: (26.0 * scale) as u16,
-                color: Color::new(1.0, 0.86, 0.5, 1.0),
-                ..Default::default()
-            },
+            26.0 * scale,
+            Color::new(1.0, 0.86, 0.5, 1.0),
         );
     }
 
@@ -553,27 +980,30 @@ impl App {
             Color::new(0.92, 0.67, 0.28, 0.55),
         );
 
-        for y in 0..CANVAS_H {
-            for x in 0..CANVAS_W {
+        for y in 0..self.height {
+            for x in 0..self.width {
                 let px = layout.canvas.x + x as f32 * layout.cell;
                 let py = layout.canvas.y + y as f32 * layout.cell;
-                let checker = if (x + y) % 2 == 0 {
-                    Color::new(0.1, 0.11, 0.15, 1.0)
-                } else {
-                    Color::new(0.075, 0.08, 0.115, 1.0)
-                };
-                draw_rectangle(px, py, layout.cell, layout.cell, checker);
+                draw_rectangle(
+                    px,
+                    py,
+                    layout.cell,
+                    layout.cell,
+                    checker_color(x, y, self.background),
+                );
 
                 let pixel = self.pixel(x, y);
                 if pixel.a > 0 {
                     draw_rectangle(px, py, layout.cell, layout.cell, pixel.color());
-                    draw_rectangle(
-                        px + 1.0,
-                        py + 1.0,
-                        layout.cell - 2.0,
-                        (layout.cell * 0.25).max(1.0),
-                        fade(WHITE, 0.18),
-                    );
+                    if layout.cell >= 6.0 {
+                        draw_rectangle(
+                            px + 1.0,
+                            py + 1.0,
+                            layout.cell - 2.0,
+                            (layout.cell * 0.25).max(1.0),
+                            fade(WHITE, 0.18),
+                        );
+                    }
                 }
             }
         }
@@ -586,9 +1016,17 @@ impl App {
                         is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
                     rect_cells(start, end, filled)
                 }
+                Tool::Ellipse => {
+                    let filled =
+                        is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+                    ellipse_cells(start, end, filled)
+                }
                 _ => Vec::new(),
             };
             for (x, y) in cells {
+                if !self.in_bounds(x, y) {
+                    continue;
+                }
                 let px = layout.canvas.x + x as f32 * layout.cell;
                 let py = layout.canvas.y + y as f32 * layout.cell;
                 draw_rectangle(
@@ -598,19 +1036,21 @@ impl App {
                     layout.cell,
                     fade(self.current.color(), 0.42),
                 );
-                draw_rectangle_lines(
-                    px + 2.0,
-                    py + 2.0,
-                    layout.cell - 4.0,
-                    layout.cell - 4.0,
-                    1.5,
-                    Color::new(1.0, 0.95, 0.58, 0.8),
-                );
+                if layout.cell >= 6.0 {
+                    draw_rectangle_lines(
+                        px + 2.0,
+                        py + 2.0,
+                        layout.cell - 4.0,
+                        layout.cell - 4.0,
+                        1.5,
+                        Color::new(1.0, 0.95, 0.58, 0.8),
+                    );
+                }
             }
         }
 
-        if self.show_grid {
-            for x in 0..=CANVAS_W {
+        if self.show_grid && layout.cell >= 5.0 {
+            for x in 0..=self.width {
                 let px = layout.canvas.x + x as f32 * layout.cell;
                 draw_line(
                     px,
@@ -621,7 +1061,7 @@ impl App {
                     Color::new(0.18, 0.21, 0.28, 0.55),
                 );
             }
-            for y in 0..=CANVAS_H {
+            for y in 0..=self.height {
                 let py = layout.canvas.y + y as f32 * layout.cell;
                 draw_line(
                     layout.canvas.x,
@@ -637,15 +1077,11 @@ impl App {
 
     fn draw_palette(&self, layout: &Layout) {
         let scale = layout.ui_scale;
-        draw_text_ex(
+        draw_section_label(
             "PALETTE",
             layout.right.x + 18.0 * scale,
             layout.right.y + 30.0 * scale,
-            TextParams {
-                font_size: (18.0 * scale) as u16,
-                color: Color::new(0.62, 0.91, 1.0, 1.0),
-                ..Default::default()
-            },
+            scale,
         );
 
         for (index, pixel) in self.palette.iter().enumerate() {
@@ -669,9 +1105,9 @@ impl App {
 
         let current_rect = Rect::new(
             layout.right.x + 18.0 * scale,
-            layout.right.y + 298.0 * scale,
+            layout.right.y + 262.0 * scale,
             layout.right.w - 36.0 * scale,
-            76.0 * scale,
+            112.0 * scale,
         );
         draw_rectangle(
             current_rect.x,
@@ -688,15 +1124,12 @@ impl App {
             1.0,
             Color::new(0.35, 0.9, 1.0, 0.28),
         );
-        draw_text_ex(
+        draw_text_line(
             "CURRENT",
             current_rect.x + 14.0 * scale,
             current_rect.y + 22.0 * scale,
-            TextParams {
-                font_size: (12.0 * scale) as u16,
-                color: Color::new(0.55, 0.6, 0.68, 1.0),
-                ..Default::default()
-            },
+            12.0 * scale,
+            Color::new(0.55, 0.6, 0.68, 1.0),
         );
         draw_rectangle(
             current_rect.x + current_rect.w - 58.0 * scale,
@@ -705,21 +1138,38 @@ impl App {
             42.0 * scale,
             self.current.color(),
         );
-        draw_text_ex(
+        draw_text_line(
             &format!(
                 "#{:02X}{:02X}{:02X}",
                 self.current.r, self.current.g, self.current.b
             ),
             current_rect.x + 14.0 * scale,
             current_rect.y + 52.0 * scale,
-            TextParams {
-                font_size: (18.0 * scale) as u16,
-                color: Color::new(0.96, 0.9, 0.72, 1.0),
-                ..Default::default()
-            },
+            18.0 * scale,
+            Color::new(0.96, 0.9, 0.72, 1.0),
+        );
+        draw_text_line(
+            &format!("{} x {} px", self.width, self.height),
+            current_rect.x + 14.0 * scale,
+            current_rect.y + 82.0 * scale,
+            14.0 * scale,
+            Color::new(0.72, 0.84, 0.91, 1.0),
         );
 
         draw_button(layout.export_button, "Export PNG", true, scale);
+        draw_button(layout.new_button, "New Project", false, scale);
+        draw_button(layout.undo_button, "Undo", false, scale);
+        draw_button(layout.redo_button, "Redo", false, scale);
+        draw_button(
+            layout.grid_button,
+            if self.show_grid {
+                "Grid On"
+            } else {
+                "Grid Off"
+            },
+            self.show_grid,
+            scale,
+        );
         draw_button(layout.clear_button, "Clear", false, scale);
     }
 
@@ -728,19 +1178,16 @@ impl App {
         let status = if get_time() < self.status_until {
             self.status.as_str()
         } else {
-            "Ctrl+S export  Ctrl+Z undo  G grid  [ ] brush"
+            "Ctrl+S export  Ctrl+N new  Ctrl+Z undo  Shift fills shapes  [ ] brush"
         };
         let y = (layout.canvas.y + layout.canvas.h + 34.0 * scale).min(screen_height() - 18.0);
         let dims = measure_text(status, None, (15.0 * scale) as u16, 1.0);
-        draw_text_ex(
+        draw_text_line(
             status,
             screen_width() * 0.5 - dims.width * 0.5,
             y,
-            TextParams {
-                font_size: (15.0 * scale) as u16,
-                color: Color::new(0.7, 0.84, 0.9, 0.9),
-                ..Default::default()
-            },
+            15.0 * scale,
+            Color::new(0.7, 0.84, 0.9, 0.9),
         );
     }
 
@@ -784,7 +1231,7 @@ impl App {
 
     fn clear_canvas(&mut self) {
         self.push_undo();
-        self.pixels.fill(Pixel::TRANSPARENT);
+        self.pixels.fill(self.background.pixel());
         self.flash("Canvas cleared");
     }
 
@@ -799,10 +1246,11 @@ impl App {
             .map(|duration| duration.as_secs())
             .unwrap_or(0);
         let path = format!("exports/pixel-art-{timestamp}.png");
-        let mut image = ImageBuffer::<Rgba<u8>, Vec<u8>>::new(CANVAS_W as u32, CANVAS_H as u32);
+        let mut image =
+            ImageBuffer::<Rgba<u8>, Vec<u8>>::new(self.width as u32, self.height as u32);
 
-        for y in 0..CANVAS_H {
-            for x in 0..CANVAS_W {
+        for y in 0..self.height {
+            for x in 0..self.width {
                 let pixel = self.pixel(x, y);
                 image.put_pixel(
                     x as u32,
@@ -819,13 +1267,26 @@ impl App {
     }
 
     fn paint_cell(&mut self, x: usize, y: usize) {
-        let color = self.tool_pixel();
-        let radius = self.brush_size.saturating_sub(1) as i32;
+        match self.tool {
+            Tool::Spray => self.spray_cell(x, y),
+            Tool::Mirror => {
+                self.paint_brush(x, y, self.current, false);
+                let mirror_x = self.width - 1 - x;
+                self.paint_brush(mirror_x, y, self.current, false);
+            }
+            Tool::Dither => self.paint_brush(x, y, self.current, true),
+            Tool::Eraser => self.paint_brush(x, y, Pixel::TRANSPARENT, false),
+            _ => self.paint_brush(x, y, self.current, false),
+        }
+    }
+
+    fn paint_brush(&mut self, x: usize, y: usize, color: Pixel, dither: bool) {
+        let half = self.brush_size as i32 / 2;
         let center_x = x as i32;
         let center_y = y as i32;
 
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
+        for dy in -half..=half {
+            for dx in -half..=half {
                 let nx = center_x + dx;
                 let ny = center_y + dy;
                 if nx < 0 || ny < 0 {
@@ -833,24 +1294,41 @@ impl App {
                 }
                 let nx = nx as usize;
                 let ny = ny as usize;
-                if nx < CANVAS_W && ny < CANVAS_H {
+                if self.in_bounds(nx, ny) && (!dither || (nx + ny).is_multiple_of(2)) {
                     self.set_raw(nx, ny, color);
                 }
             }
         }
     }
 
-    fn tool_pixel(&self) -> Pixel {
-        if self.tool == Tool::Eraser {
-            Pixel::TRANSPARENT
-        } else {
-            self.current
+    fn spray_cell(&mut self, x: usize, y: usize) {
+        let radius = self.brush_size.max(2) as i32 + 2;
+        let density = (self.brush_size * 5).max(10);
+        let seed = self.tick as i32 + x as i32 * 37 + y as i32 * 53;
+        for i in 0..density {
+            let h = pseudo_hash(seed + i as i32 * 97);
+            let dx = h % (radius * 2 + 1) - radius;
+            let dy = (h / 17) % (radius * 2 + 1) - radius;
+            if dx * dx + dy * dy > radius * radius {
+                continue;
+            }
+            let nx = x as i32 + dx;
+            let ny = y as i32 + dy;
+            if nx >= 0 && ny >= 0 {
+                let nx = nx as usize;
+                let ny = ny as usize;
+                if self.in_bounds(nx, ny) {
+                    self.set_raw(nx, ny, self.current);
+                }
+            }
         }
     }
 
-    fn draw_line(&mut self, x0: usize, y0: usize, x1: usize, y1: usize, color: Pixel) {
-        for (x, y) in line_cells((x0, y0), (x1, y1)) {
-            self.set_raw(x, y, color);
+    fn draw_line(&mut self, start: (usize, usize), end: (usize, usize), color: Pixel) {
+        for (x, y) in line_cells(start, end) {
+            if self.in_bounds(x, y) {
+                self.set_raw(x, y, color);
+            }
         }
     }
 
@@ -862,7 +1340,23 @@ impl App {
         filled: bool,
     ) {
         for (x, y) in rect_cells(start, end, filled) {
-            self.set_raw(x, y, color);
+            if self.in_bounds(x, y) {
+                self.set_raw(x, y, color);
+            }
+        }
+    }
+
+    fn draw_ellipse(
+        &mut self,
+        start: (usize, usize),
+        end: (usize, usize),
+        color: Pixel,
+        filled: bool,
+    ) {
+        for (x, y) in ellipse_cells(start, end, filled) {
+            if self.in_bounds(x, y) {
+                self.set_raw(x, y, color);
+            }
         }
     }
 
@@ -886,13 +1380,13 @@ impl App {
             if cx > 0 {
                 stack.push((cx - 1, cy));
             }
-            if cx + 1 < CANVAS_W {
+            if cx + 1 < self.width {
                 stack.push((cx + 1, cy));
             }
             if cy > 0 {
                 stack.push((cx, cy - 1));
             }
-            if cy + 1 < CANVAS_H {
+            if cy + 1 < self.height {
                 stack.push((cx, cy + 1));
             }
         }
@@ -900,21 +1394,28 @@ impl App {
     }
 
     fn pixel(&self, x: usize, y: usize) -> Pixel {
-        self.pixels[index(x, y)]
+        self.pixels[self.index(x, y)]
     }
 
     fn set_raw(&mut self, x: usize, y: usize, color: Pixel) {
-        self.pixels[index(x, y)] = color;
+        if self.in_bounds(x, y) {
+            let index = self.index(x, y);
+            self.pixels[index] = color;
+        }
+    }
+
+    fn index(&self, x: usize, y: usize) -> usize {
+        y * self.width + x
+    }
+
+    fn in_bounds(&self, x: usize, y: usize) -> bool {
+        x < self.width && y < self.height
     }
 
     fn flash(&mut self, message: &str) {
         self.status = message.to_owned();
         self.status_until = get_time() + 2.2;
     }
-}
-
-fn index(x: usize, y: usize) -> usize {
-    y * CANVAS_W + x
 }
 
 fn mouse_vec() -> Vec2 {
@@ -928,22 +1429,22 @@ fn canvas_cell(layout: &Layout, mouse: Vec2) -> Option<(usize, usize)> {
     }
     let x = ((mouse.x - layout.canvas.x) / layout.cell).floor() as usize;
     let y = ((mouse.y - layout.canvas.y) / layout.cell).floor() as usize;
-    (x < CANVAS_W && y < CANVAS_H).then_some((x, y))
+    (x < layout.canvas_w && y < layout.canvas_h).then_some((x, y))
 }
 
 fn tool_button_rect(layout: &Layout, index: usize) -> Rect {
     let scale = layout.ui_scale;
     Rect::new(
         layout.left.x + 16.0 * scale,
-        layout.left.y + 54.0 * scale + index as f32 * 48.0 * scale,
+        layout.left.y + 54.0 * scale + index as f32 * 36.5 * scale,
         layout.left.w - 32.0 * scale,
-        36.0 * scale,
+        29.0 * scale,
     )
 }
 
 fn palette_rect(layout: &Layout, index: usize) -> Rect {
     let scale = layout.ui_scale;
-    let swatch = 34.0 * scale;
+    let swatch = 32.0 * scale;
     let gap = 9.0 * scale;
     let columns = 5;
     let col = index % columns;
@@ -953,6 +1454,61 @@ fn palette_rect(layout: &Layout, index: usize) -> Rect {
         layout.right.y + 54.0 * scale + row as f32 * (swatch + gap),
         swatch,
         swatch,
+    )
+}
+
+fn setup_panel_rect(scale: f32) -> Rect {
+    let w = 900.0 * scale;
+    let h = 560.0 * scale;
+    Rect::new(
+        screen_width() * 0.5 - w * 0.5,
+        screen_height() * 0.52 - h * 0.5,
+        w,
+        h,
+    )
+}
+
+fn setup_preset_rect(index: usize, scale: f32) -> Rect {
+    let panel = setup_panel_rect(scale);
+    let col = index % 3;
+    let row = index / 3;
+    let w = 178.0 * scale;
+    let h = 92.0 * scale;
+    Rect::new(
+        panel.x + 32.0 * scale + col as f32 * 194.0 * scale,
+        panel.y + 76.0 * scale + row as f32 * 112.0 * scale,
+        w,
+        h,
+    )
+}
+
+fn setup_background_rect(index: usize, scale: f32) -> Rect {
+    let panel = setup_panel_rect(scale);
+    Rect::new(
+        panel.x + 32.0 * scale + index as f32 * 148.0 * scale,
+        panel.y + 398.0 * scale,
+        132.0 * scale,
+        36.0 * scale,
+    )
+}
+
+fn setup_demo_rect(scale: f32) -> Rect {
+    let panel = setup_panel_rect(scale);
+    Rect::new(
+        panel.x + 32.0 * scale,
+        panel.y + 448.0 * scale,
+        200.0 * scale,
+        36.0 * scale,
+    )
+}
+
+fn setup_create_rect(scale: f32) -> Rect {
+    let panel = setup_panel_rect(scale);
+    Rect::new(
+        panel.x + panel.w - 252.0 * scale,
+        panel.y + panel.h - 86.0 * scale,
+        180.0 * scale,
+        42.0 * scale,
     )
 }
 
@@ -967,9 +1523,7 @@ fn line_cells(start: (usize, usize), end: (usize, usize)) -> Vec<(usize, usize)>
     let mut cells = Vec::new();
 
     loop {
-        if x0 >= 0 && y0 >= 0 && x0 < CANVAS_W as i32 && y0 < CANVAS_H as i32 {
-            cells.push((x0 as usize, y0 as usize));
-        }
+        cells.push((x0 as usize, y0 as usize));
         if x0 == x1 && y0 == y1 {
             break;
         }
@@ -1001,6 +1555,70 @@ fn rect_cells(start: (usize, usize), end: (usize, usize), filled: bool) -> Vec<(
         }
     }
     cells
+}
+
+fn ellipse_cells(start: (usize, usize), end: (usize, usize), filled: bool) -> Vec<(usize, usize)> {
+    let min_x = start.0.min(end.0);
+    let max_x = start.0.max(end.0);
+    let min_y = start.1.min(end.1);
+    let max_y = start.1.max(end.1);
+    let width = max_x - min_x + 1;
+    let height = max_y - min_y + 1;
+    if width <= 2 || height <= 2 {
+        return rect_cells(start, end, filled);
+    }
+
+    let cx = (min_x + max_x) as f32 * 0.5;
+    let cy = (min_y + max_y) as f32 * 0.5;
+    let rx = (width as f32 - 1.0) * 0.5;
+    let ry = (height as f32 - 1.0) * 0.5;
+    let edge = (1.35 / rx.max(ry)).max(0.035);
+    let mut cells = Vec::new();
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let nx = (x as f32 - cx) / rx;
+            let ny = (y as f32 - cy) / ry;
+            let v = nx * nx + ny * ny;
+            if (filled && v <= 1.0) || (!filled && (v - 1.0).abs() <= edge) {
+                cells.push((x, y));
+            }
+        }
+    }
+    cells
+}
+
+fn pseudo_hash(mut value: i32) -> i32 {
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    value.abs()
+}
+
+fn checker_color(x: usize, y: usize, background: CanvasBackground) -> Color {
+    match background {
+        CanvasBackground::Transparent => {
+            if (x + y).is_multiple_of(2) {
+                Color::new(0.1, 0.11, 0.15, 1.0)
+            } else {
+                Color::new(0.075, 0.08, 0.115, 1.0)
+            }
+        }
+        CanvasBackground::White => {
+            if (x + y).is_multiple_of(2) {
+                Color::new(0.86, 0.88, 0.92, 1.0)
+            } else {
+                Color::new(0.94, 0.95, 0.98, 1.0)
+            }
+        }
+        CanvasBackground::Dark => {
+            if (x + y).is_multiple_of(2) {
+                Color::new(0.07, 0.075, 0.105, 1.0)
+            } else {
+                Color::new(0.095, 0.1, 0.14, 1.0)
+            }
+        }
+    }
 }
 
 fn draw_background() {
@@ -1043,9 +1661,7 @@ fn draw_background() {
     }
 }
 
-fn draw_title(scale: f32) {
-    let title = "PIXEL PAINT STUDIO";
-    let subtitle = "pixel-art editor with undo, palette and PNG export";
+fn draw_title(scale: f32, title: &str, subtitle: &str) {
     let title_size = (34.0 * scale) as u16;
     let subtitle_size = (16.0 * scale) as u16;
     let title_dims = measure_text(title, None, title_size, 1.0);
@@ -1101,6 +1717,23 @@ fn draw_panel(rect: Rect, color: Color) {
     );
 }
 
+fn draw_section_label(label: &str, x: f32, y: f32, scale: f32) {
+    draw_text_line(label, x, y, 18.0 * scale, Color::new(0.62, 0.91, 1.0, 1.0));
+}
+
+fn draw_text_line(text: &str, x: f32, y: f32, size: f32, color: Color) {
+    draw_text_ex(
+        text,
+        x,
+        y,
+        TextParams {
+            font_size: size as u16,
+            color,
+            ..Default::default()
+        },
+    );
+}
+
 fn draw_button(rect: Rect, label: &str, primary: bool, scale: f32) {
     let accent = if primary {
         Color::new(0.35, 0.9, 1.0, 1.0)
@@ -1119,7 +1752,7 @@ fn draw_button(rect: Rect, label: &str, primary: bool, scale: f32) {
         },
     );
     draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, fade(accent, 0.65));
-    let size = (15.0 * scale) as u16;
+    let size = (14.5 * scale) as u16;
     let dims = measure_text(label, None, size, 1.0);
     draw_text_ex(
         label,
@@ -1177,5 +1810,11 @@ mod tests {
     fn filled_rect_contains_center() {
         let cells = rect_cells((1, 1), (3, 3), true);
         assert!(cells.contains(&(2, 2)));
+    }
+
+    #[test]
+    fn ellipse_has_center_when_filled() {
+        let cells = ellipse_cells((1, 1), (5, 5), true);
+        assert!(cells.contains(&(3, 3)));
     }
 }

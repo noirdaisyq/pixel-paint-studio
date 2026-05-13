@@ -4,7 +4,7 @@
     <path d="M56-30-50 450M122-30 16 450M188-30 82 450M254-30 148 450M320-30 214 450M386-30 280 450M452-30 346 450M518-30 412 450M584-30 478 450M650-30 544 450M716-30 610 450M782-30 676 450M848-30 742 450M914-30 808 450M980-30 874 450"/>
   </g>
   <text x="480" y="58" text-anchor="middle" font-family="Verdana, Arial, sans-serif" font-size="34" font-weight="700" fill="#ffd873">PIXEL PAINT STUDIO</text>
-  <text x="480" y="86" text-anchor="middle" font-family="Verdana, Arial, sans-serif" font-size="15" fill="#9eeaff">pixel-art editor with undo, palette and PNG export</text>
+  <text x="480" y="86" text-anchor="middle" font-family="Verdana, Arial, sans-serif" font-size="15" fill="#9eeaff">fuller Paint-style pixel editor with setup, tools, undo and PNG export</text>
 
   <rect x="82" y="116" width="150" height="252" rx="5" fill="#171622" stroke="#b48b42" stroke-opacity=".45"/>
   <text x="108" y="154" font-family="Verdana, Arial, sans-serif" font-size="16" font-weight="700" fill="#9eeaff">TOOLS</text>
@@ -16,7 +16,7 @@
     <rect x="106" y="254" width="102" height="28" fill="#0b0d14" stroke="#354052"/>
     <text x="122" y="273">F Fill</text>
     <rect x="106" y="292" width="102" height="28" fill="#0b0d14" stroke="#354052"/>
-    <text x="122" y="311">L Line</text>
+    <text x="122" y="311">O Ellipse</text>
   </g>
 
   <g filter="url(#glow)">
@@ -60,8 +60,10 @@
     <rect x="788" y="246" width="26" height="26" fill="#58e6ff"/>
     <rect x="822" y="246" width="26" height="26" fill="#61f274"/>
   </g>
-  <rect x="754" y="308" width="96" height="34" fill="#08202a" stroke="#58e6ff" stroke-opacity=".65"/>
-  <text x="776" y="331" font-family="Verdana, Arial, sans-serif" font-size="14" font-weight="700" fill="#c7f7ff">Export PNG</text>
+  <rect x="754" y="298" width="96" height="30" fill="#08202a" stroke="#58e6ff" stroke-opacity=".65"/>
+  <text x="773" y="319" font-family="Verdana, Arial, sans-serif" font-size="13" font-weight="700" fill="#c7f7ff">Export PNG</text>
+  <rect x="754" y="336" width="96" height="24" fill="#141821" stroke="#798492" stroke-opacity=".65"/>
+  <text x="786" y="353" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#d8edf4">Undo</text>
 
   <defs>
     <filter id="glow" x="250" y="80" width="460" height="320" filterUnits="userSpaceOnUse">
