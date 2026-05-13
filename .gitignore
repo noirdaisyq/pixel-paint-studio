@@ -1,0 +1,5 @@
+/target/
+/exports/
+/dist/
+*.exe
+*.pdb

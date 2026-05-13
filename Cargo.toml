@@ -1,0 +1,13 @@
+[package]
+name = "pixel-paint-studio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+macroquad = "0.4.14"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
