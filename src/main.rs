@@ -213,7 +213,7 @@ impl Default for SetupState {
         Self {
             preset_index: 2,
             background: CanvasBackground::Transparent,
-            demo_art: false,
+            demo_art: true,
         }
     }
 }
@@ -628,34 +628,45 @@ impl App {
             return;
         }
 
-        let yellow = Pixel::rgb(255, 216, 64);
-        let cyan = Pixel::rgb(88, 230, 255);
-        let pink = Pixel::rgb(255, 72, 91);
-        let purple = Pixel::rgb(189, 115, 255);
-        let green = Pixel::rgb(97, 242, 116);
-        let base_y = self.height.saturating_sub(8);
-        let base_x = self.width / 2;
+        let fur = Pixel::rgb(244, 153, 76);
+        let fur_shadow = Pixel::rgb(202, 96, 48);
+        let cream = Pixel::rgb(255, 224, 166);
+        let outline = Pixel::rgb(54, 34, 38);
+        let eye = Pixel::rgb(30, 28, 38);
+        let pink = Pixel::rgb(255, 132, 160);
+        let shine = Pixel::rgb(255, 240, 190);
 
-        for y in base_y..self.height {
-            for x in base_x.saturating_sub(10)..base_x.saturating_sub(6) {
-                self.set_raw(x, y, yellow);
-            }
-        }
-        for y in base_y.saturating_sub(6)..self.height {
-            self.set_raw(base_x.saturating_sub(3), y, pink);
-            self.set_raw(base_x.saturating_sub(2), y, pink);
-        }
-        for y in base_y.saturating_sub(10)..self.height {
-            self.set_raw((base_x + 8).min(self.width - 1), y, cyan);
-        }
-        for x in base_x.saturating_sub(1)..(base_x + 7).min(self.width) {
-            self.set_raw(x, base_y.saturating_sub(1), purple);
-            self.set_raw(x, base_y.min(self.height - 1), purple);
-        }
-        for x in base_x.saturating_sub(18)..base_x.saturating_sub(13) {
-            self.set_raw(x, base_y.saturating_add(2).min(self.height - 1), green);
-            self.set_raw(x, base_y.saturating_add(3).min(self.height - 1), green);
-        }
+        self.fill_ellipse_ratio(0.50, 0.62, 0.19, 0.25, fur_shadow);
+        self.fill_ellipse_ratio(0.50, 0.61, 0.16, 0.22, fur);
+        self.fill_ellipse_ratio(0.29, 0.66, 0.10, 0.07, fur_shadow);
+        self.fill_ellipse_ratio(0.22, 0.62, 0.11, 0.055, fur);
+
+        self.fill_triangle_ratio((0.31, 0.34), (0.39, 0.11), (0.46, 0.36), outline);
+        self.fill_triangle_ratio((0.54, 0.36), (0.61, 0.11), (0.69, 0.34), outline);
+        self.fill_triangle_ratio((0.34, 0.34), (0.40, 0.17), (0.45, 0.36), fur);
+        self.fill_triangle_ratio((0.55, 0.36), (0.60, 0.17), (0.66, 0.34), fur);
+        self.fill_triangle_ratio((0.37, 0.32), (0.40, 0.22), (0.43, 0.34), pink);
+        self.fill_triangle_ratio((0.57, 0.34), (0.60, 0.22), (0.63, 0.32), pink);
+
+        self.fill_ellipse_ratio(0.50, 0.42, 0.23, 0.20, outline);
+        self.fill_ellipse_ratio(0.50, 0.41, 0.20, 0.18, fur);
+        self.fill_ellipse_ratio(0.50, 0.49, 0.12, 0.08, cream);
+        self.fill_ellipse_ratio(0.41, 0.43, 0.035, 0.043, eye);
+        self.fill_ellipse_ratio(0.59, 0.43, 0.035, 0.043, eye);
+        self.fill_ellipse_ratio(0.425, 0.415, 0.010, 0.012, shine);
+        self.fill_ellipse_ratio(0.575, 0.415, 0.010, 0.012, shine);
+        self.fill_triangle_ratio((0.48, 0.49), (0.52, 0.49), (0.50, 0.535), pink);
+        self.draw_line_ratio((0.50, 0.535), (0.50, 0.565), outline, 1);
+        self.draw_line_ratio((0.39, 0.53), (0.24, 0.49), outline, 1);
+        self.draw_line_ratio((0.39, 0.56), (0.25, 0.58), outline, 1);
+        self.draw_line_ratio((0.61, 0.53), (0.76, 0.49), outline, 1);
+        self.draw_line_ratio((0.61, 0.56), (0.75, 0.58), outline, 1);
+
+        self.draw_line_ratio((0.43, 0.25), (0.46, 0.35), fur_shadow, 1);
+        self.draw_line_ratio((0.50, 0.23), (0.50, 0.34), fur_shadow, 1);
+        self.draw_line_ratio((0.57, 0.25), (0.54, 0.35), fur_shadow, 1);
+        self.fill_ellipse_ratio(0.35, 0.50, 0.035, 0.022, Pixel::rgb(255, 170, 142));
+        self.fill_ellipse_ratio(0.65, 0.50, 0.035, 0.022, Pixel::rgb(255, 170, 142));
     }
 
     fn update_editor(&mut self, layout: &Layout) {
@@ -749,13 +760,11 @@ impl App {
                 "Grid off"
             });
         }
-        if is_key_pressed(KeyCode::LeftBracket) {
-            self.brush_size = self.brush_size.saturating_sub(1).max(1);
-            self.flash(&format!("Brush {}px", self.brush_size));
+        if is_key_pressed(KeyCode::LeftBracket) || is_key_pressed(KeyCode::Minus) {
+            self.change_brush_size(-1);
         }
-        if is_key_pressed(KeyCode::RightBracket) {
-            self.brush_size = (self.brush_size + 1).min(8);
-            self.flash(&format!("Brush {}px", self.brush_size));
+        if is_key_pressed(KeyCode::RightBracket) || is_key_pressed(KeyCode::Equal) {
+            self.change_brush_size(1);
         }
         if is_key_pressed(KeyCode::Delete) {
             self.clear_canvas();
@@ -785,6 +794,14 @@ impl App {
     }
 
     fn handle_action_click(&mut self, layout: &Layout, mouse: Vec2) -> bool {
+        if brush_minus_rect(layout).contains(mouse) {
+            self.change_brush_size(-1);
+            return true;
+        }
+        if brush_plus_rect(layout).contains(mouse) {
+            self.change_brush_size(1);
+            return true;
+        }
         if layout.export_button.contains(mouse) {
             self.export_png();
             return true;
@@ -946,11 +963,13 @@ impl App {
             13.0 * scale,
             Color::new(0.55, 0.6, 0.68, 1.0),
         );
+        draw_button(brush_minus_rect(layout), "-", false, scale);
+        draw_button(brush_plus_rect(layout), "+", true, scale);
         draw_text_line(
             &format!("{} px", self.brush_size),
-            layout.left.x + 18.0 * scale,
+            layout.left.x + 62.0 * scale,
             layout.left.y + layout.left.h - 48.0 * scale,
-            26.0 * scale,
+            24.0 * scale,
             Color::new(1.0, 0.86, 0.5, 1.0),
         );
     }
@@ -1281,14 +1300,15 @@ impl App {
     }
 
     fn paint_brush(&mut self, x: usize, y: usize, color: Pixel, dither: bool) {
-        let half = self.brush_size as i32 / 2;
+        let size = self.brush_size.max(1) as i32;
+        let anchor = size / 2;
         let center_x = x as i32;
         let center_y = y as i32;
 
-        for dy in -half..=half {
-            for dx in -half..=half {
-                let nx = center_x + dx;
-                let ny = center_y + dy;
+        for oy in 0..size {
+            for ox in 0..size {
+                let nx = center_x + ox - anchor;
+                let ny = center_y + oy - anchor;
                 if nx < 0 || ny < 0 {
                     continue;
                 }
@@ -1416,6 +1436,77 @@ impl App {
         self.status = message.to_owned();
         self.status_until = get_time() + 2.2;
     }
+
+    fn change_brush_size(&mut self, delta: i32) {
+        self.brush_size = (self.brush_size as i32 + delta).clamp(1, 8) as usize;
+        self.flash(&format!("Brush {}px", self.brush_size));
+    }
+
+    fn fill_ellipse_ratio(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, color: Pixel) {
+        let center_x = cx * (self.width.saturating_sub(1)) as f32;
+        let center_y = cy * (self.height.saturating_sub(1)) as f32;
+        let radius_x = (rx * self.width as f32).max(1.0);
+        let radius_y = (ry * self.height as f32).max(1.0);
+        let min_x = (center_x - radius_x).floor().max(0.0) as usize;
+        let max_x = (center_x + radius_x).ceil().min((self.width - 1) as f32) as usize;
+        let min_y = (center_y - radius_y).floor().max(0.0) as usize;
+        let max_y = (center_y + radius_y).ceil().min((self.height - 1) as f32) as usize;
+
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let nx = (x as f32 - center_x) / radius_x;
+                let ny = (y as f32 - center_y) / radius_y;
+                if nx * nx + ny * ny <= 1.0 {
+                    self.set_raw(x, y, color);
+                }
+            }
+        }
+    }
+
+    fn fill_triangle_ratio(&mut self, a: (f32, f32), b: (f32, f32), c: (f32, f32), color: Pixel) {
+        let ax = a.0 * (self.width.saturating_sub(1)) as f32;
+        let ay = a.1 * (self.height.saturating_sub(1)) as f32;
+        let bx = b.0 * (self.width.saturating_sub(1)) as f32;
+        let by = b.1 * (self.height.saturating_sub(1)) as f32;
+        let cx = c.0 * (self.width.saturating_sub(1)) as f32;
+        let cy = c.1 * (self.height.saturating_sub(1)) as f32;
+        let min_x = ax.min(bx).min(cx).floor().max(0.0) as usize;
+        let max_x = ax.max(bx).max(cx).ceil().min((self.width - 1) as f32) as usize;
+        let min_y = ay.min(by).min(cy).floor().max(0.0) as usize;
+        let max_y = ay.max(by).max(cy).ceil().min((self.height - 1) as f32) as usize;
+
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                if point_in_triangle(x as f32 + 0.5, y as f32 + 0.5, (ax, ay), (bx, by), (cx, cy)) {
+                    self.set_raw(x, y, color);
+                }
+            }
+        }
+    }
+
+    fn draw_line_ratio(&mut self, start: (f32, f32), end: (f32, f32), color: Pixel, size: usize) {
+        let sx = (start.0 * (self.width.saturating_sub(1)) as f32).round() as usize;
+        let sy = (start.1 * (self.height.saturating_sub(1)) as f32).round() as usize;
+        let ex = (end.0 * (self.width.saturating_sub(1)) as f32).round() as usize;
+        let ey = (end.1 * (self.height.saturating_sub(1)) as f32).round() as usize;
+
+        for (x, y) in line_cells((sx, sy), (ex, ey)) {
+            self.stamp_square(x, y, size, color);
+        }
+    }
+
+    fn stamp_square(&mut self, x: usize, y: usize, size: usize, color: Pixel) {
+        let anchor = size as i32 / 2;
+        for oy in 0..size as i32 {
+            for ox in 0..size as i32 {
+                let nx = x as i32 + ox - anchor;
+                let ny = y as i32 + oy - anchor;
+                if nx >= 0 && ny >= 0 {
+                    self.set_raw(nx as usize, ny as usize, color);
+                }
+            }
+        }
+    }
 }
 
 fn mouse_vec() -> Vec2 {
@@ -1454,6 +1545,26 @@ fn palette_rect(layout: &Layout, index: usize) -> Rect {
         layout.right.y + 54.0 * scale + row as f32 * (swatch + gap),
         swatch,
         swatch,
+    )
+}
+
+fn brush_minus_rect(layout: &Layout) -> Rect {
+    let scale = layout.ui_scale;
+    Rect::new(
+        layout.left.x + 18.0 * scale,
+        layout.left.y + layout.left.h - 66.0 * scale,
+        34.0 * scale,
+        34.0 * scale,
+    )
+}
+
+fn brush_plus_rect(layout: &Layout) -> Rect {
+    let scale = layout.ui_scale;
+    Rect::new(
+        layout.left.x + layout.left.w - 52.0 * scale,
+        layout.left.y + layout.left.h - 66.0 * scale,
+        34.0 * scale,
+        34.0 * scale,
     )
 }
 
@@ -1593,6 +1704,17 @@ fn pseudo_hash(mut value: i32) -> i32 {
     value ^= value >> 17;
     value ^= value << 5;
     value.abs()
+}
+
+fn point_in_triangle(px: f32, py: f32, a: (f32, f32), b: (f32, f32), c: (f32, f32)) -> bool {
+    let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
+    if area.abs() < f32::EPSILON {
+        return false;
+    }
+    let s = ((a.1 - c.1) * (px - c.0) + (c.0 - a.0) * (py - c.1)) / area;
+    let t = ((c.1 - b.1) * (px - c.0) + (b.0 - c.0) * (py - c.1)) / area;
+    let u = 1.0 - s - t;
+    s >= 0.0 && t >= 0.0 && u >= 0.0
 }
 
 fn checker_color(x: usize, y: usize, background: CanvasBackground) -> Color {

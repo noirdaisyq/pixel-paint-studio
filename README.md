@@ -17,6 +17,7 @@ Pixel Paint Studio is a portfolio-ready pixel-art editor built with Rust and mac
 
 - Startup project setup with 16x16, 32x32, 48x48, 64x64, 96x64 and 128x128 presets.
 - Transparent, white or dark canvas background.
+- Optional demo art now starts with a small pixel cat.
 - Brush, eraser, bucket fill, color picker, line, rectangle, ellipse, spray, mirror and dither tools.
 - Palette with current-color preview.
 - New project, clear, grid, undo and redo actions in the UI.
@@ -40,7 +41,9 @@ Ctrl+N         new project setup
 Ctrl+Z / Y     undo, redo
 Ctrl+S         export PNG
 G              toggle grid
-[ / ]          brush size
+- / + buttons  brush size
+- / =          brush size from keyboard
+[ / ]          alternative brush size keys
 Delete         clear canvas
 Shift+Shape    filled rectangle or ellipse
 ```
