@@ -1,10 +1,16 @@
 use std::fs;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use image::{ImageBuffer, Rgba};
+use image::{imageops::FilterType, ImageBuffer, Rgba};
 use macroquad::prelude::*;
+use rfd::FileDialog;
 
 const HISTORY_LIMIT: usize = 80;
+const MIN_CANVAS_SIZE: usize = 8;
+const MAX_CANVAS_SIZE: usize = 256;
+const DEFAULT_CUSTOM_CANVAS_SIZE: usize = 64;
+const REFERENCE_DEFAULT_OPACITY: f32 = 0.45;
 
 const PRESETS: [CanvasPreset; 6] = [
     CanvasPreset {
@@ -201,9 +207,19 @@ enum AppMode {
     Editor,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CustomDimension {
+    Width,
+    Height,
+}
+
 #[derive(Clone, Debug)]
 struct SetupState {
     preset_index: usize,
+    use_custom: bool,
+    custom_width_text: String,
+    custom_height_text: String,
+    focused_dimension: Option<CustomDimension>,
     background: CanvasBackground,
     demo_art: bool,
 }
@@ -212,9 +228,27 @@ impl Default for SetupState {
     fn default() -> Self {
         Self {
             preset_index: 2,
+            use_custom: false,
+            custom_width_text: DEFAULT_CUSTOM_CANVAS_SIZE.to_string(),
+            custom_height_text: DEFAULT_CUSTOM_CANVAS_SIZE.to_string(),
+            focused_dimension: None,
             background: CanvasBackground::Transparent,
             demo_art: true,
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ReferenceLayer {
+    name: String,
+    width: usize,
+    height: usize,
+    pixels: Vec<Pixel>,
+}
+
+impl ReferenceLayer {
+    fn pixel(&self, x: usize, y: usize) -> Pixel {
+        self.pixels[y * self.width + x]
     }
 }
 
@@ -250,14 +284,14 @@ impl Layout {
         let cell = (available_w / canvas_w as f32)
             .min(available_h / canvas_h as f32)
             .floor()
-            .clamp(4.0, 18.0);
+            .clamp(2.0, 18.0);
         let canvas_px_w = cell * canvas_w as f32;
         let canvas_px_h = cell * canvas_h as f32;
         let total_w = left_w + gap + canvas_px_w + gap + right_w;
         let start_x = (sw - total_w) * 0.5;
         let canvas_x = start_x + left_w + gap;
         let canvas_y = top + (available_h - canvas_px_h) * 0.5;
-        let panel_h = canvas_px_h.max(560.0 * ui_scale).min(available_h);
+        let panel_h = canvas_px_h.max(640.0 * ui_scale).min(available_h);
         let panel_y = top + (available_h - panel_h) * 0.5;
         let left = Rect::new(start_x, panel_y, left_w, panel_h);
         let right = Rect::new(canvas_x + canvas_px_w + gap, panel_y, right_w, panel_h);
@@ -311,6 +345,8 @@ struct App {
     height: usize,
     background: CanvasBackground,
     pixels: Vec<Pixel>,
+    reference: Option<ReferenceLayer>,
+    reference_opacity: f32,
     undo: Vec<Vec<Pixel>>,
     redo: Vec<Vec<Pixel>>,
     palette: Vec<Pixel>,
@@ -358,6 +394,8 @@ impl App {
             height: 48,
             background: CanvasBackground::Transparent,
             pixels: vec![Pixel::TRANSPARENT; 48 * 48],
+            reference: None,
+            reference_opacity: REFERENCE_DEFAULT_OPACITY,
             undo: Vec::new(),
             redo: Vec::new(),
             palette,
@@ -407,53 +445,88 @@ impl App {
     }
 
     fn update_setup(&mut self) {
-        if is_key_pressed(KeyCode::Key1) {
-            self.setup.preset_index = 0;
-        }
-        if is_key_pressed(KeyCode::Key2) {
-            self.setup.preset_index = 1;
-        }
-        if is_key_pressed(KeyCode::Key3) {
-            self.setup.preset_index = 2;
-        }
-        if is_key_pressed(KeyCode::Key4) {
-            self.setup.preset_index = 3;
-        }
-        if is_key_pressed(KeyCode::Key5) {
-            self.setup.preset_index = 4;
-        }
-        if is_key_pressed(KeyCode::Key6) {
-            self.setup.preset_index = 5;
-        }
-        if is_key_pressed(KeyCode::Left) {
-            self.setup.preset_index = self.setup.preset_index.saturating_sub(1);
-        }
-        if is_key_pressed(KeyCode::Right) {
-            self.setup.preset_index = (self.setup.preset_index + 1).min(PRESETS.len() - 1);
-        }
-        if is_key_pressed(KeyCode::Space) {
-            self.setup.demo_art = !self.setup.demo_art;
-        }
-        if is_key_pressed(KeyCode::Enter) {
-            self.create_project_from_setup();
+        if self.setup.focused_dimension.is_some() {
+            self.edit_custom_canvas_text();
+        } else {
+            if is_key_pressed(KeyCode::Key1) {
+                self.select_preset(0);
+            }
+            if is_key_pressed(KeyCode::Key2) {
+                self.select_preset(1);
+            }
+            if is_key_pressed(KeyCode::Key3) {
+                self.select_preset(2);
+            }
+            if is_key_pressed(KeyCode::Key4) {
+                self.select_preset(3);
+            }
+            if is_key_pressed(KeyCode::Key5) {
+                self.select_preset(4);
+            }
+            if is_key_pressed(KeyCode::Key6) {
+                self.select_preset(5);
+            }
+            if is_key_pressed(KeyCode::Left) {
+                self.select_preset(self.setup.preset_index.saturating_sub(1));
+            }
+            if is_key_pressed(KeyCode::Right) {
+                self.select_preset((self.setup.preset_index + 1).min(PRESETS.len() - 1));
+            }
+            if is_key_pressed(KeyCode::Space) {
+                self.setup.demo_art = !self.setup.demo_art;
+            }
+            if is_key_pressed(KeyCode::Enter) {
+                self.create_project_from_setup();
+            }
         }
 
         if is_mouse_button_pressed(MouseButton::Left) {
             let mouse = mouse_vec();
             for index in 0..PRESETS.len() {
                 if setup_preset_rect(index, self.setup_scale()).contains(mouse) {
-                    self.setup.preset_index = index;
+                    self.select_preset(index);
                     return;
                 }
+            }
+            if custom_width_minus_rect(self.setup_scale()).contains(mouse) {
+                self.adjust_custom_canvas_size(CustomDimension::Width, -1);
+                return;
+            }
+            if custom_width_plus_rect(self.setup_scale()).contains(mouse) {
+                self.adjust_custom_canvas_size(CustomDimension::Width, 1);
+                return;
+            }
+            if custom_height_minus_rect(self.setup_scale()).contains(mouse) {
+                self.adjust_custom_canvas_size(CustomDimension::Height, -1);
+                return;
+            }
+            if custom_height_plus_rect(self.setup_scale()).contains(mouse) {
+                self.adjust_custom_canvas_size(CustomDimension::Height, 1);
+                return;
+            }
+            if custom_width_field_rect(self.setup_scale()).contains(mouse) {
+                self.focus_custom_dimension(CustomDimension::Width);
+                return;
+            }
+            if custom_height_field_rect(self.setup_scale()).contains(mouse) {
+                self.focus_custom_dimension(CustomDimension::Height);
+                return;
+            }
+            if setup_custom_rect(self.setup_scale()).contains(mouse) {
+                self.setup.use_custom = true;
+                self.setup.focused_dimension = None;
+                return;
             }
             for (index, background) in CanvasBackground::ALL.iter().enumerate() {
                 if setup_background_rect(index, self.setup_scale()).contains(mouse) {
                     self.setup.background = *background;
+                    self.setup.focused_dimension = None;
                     return;
                 }
             }
             if setup_demo_rect(self.setup_scale()).contains(mouse) {
                 self.setup.demo_art = !self.setup.demo_art;
+                self.setup.focused_dimension = None;
                 return;
             }
             if setup_create_rect(self.setup_scale()).contains(mouse) {
@@ -481,7 +554,7 @@ impl App {
 
         for (index, preset) in PRESETS.iter().enumerate() {
             let rect = setup_preset_rect(index, scale);
-            let active = index == self.setup.preset_index;
+            let active = !self.setup.use_custom && index == self.setup.preset_index;
             let accent = if active {
                 Color::new(1.0, 0.82, 0.28, 1.0)
             } else {
@@ -523,7 +596,9 @@ impl App {
             );
         }
 
-        let selected = PRESETS[self.setup.preset_index];
+        self.draw_custom_canvas_controls(scale);
+
+        let selected = self.selected_canvas_preset();
         draw_section_label(
             "BACKGROUND",
             panel.x + 32.0 * scale,
@@ -562,6 +637,96 @@ impl App {
         );
 
         draw_button(setup_create_rect(scale), "Create Canvas", true, scale);
+    }
+
+    fn draw_custom_canvas_controls(&self, scale: f32) {
+        let rect = setup_custom_rect(scale);
+        let active = self.setup.use_custom;
+        let accent = if active {
+            Color::new(1.0, 0.82, 0.28, 1.0)
+        } else {
+            Color::new(0.32, 0.38, 0.48, 1.0)
+        };
+
+        draw_rectangle(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            if active {
+                Color::new(0.13, 0.115, 0.075, 0.92)
+            } else {
+                Color::new(0.025, 0.028, 0.042, 0.78)
+            },
+        );
+        draw_rectangle(rect.x, rect.y, 4.0 * scale, rect.h, accent);
+        draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, fade(accent, 0.55));
+        draw_text_line(
+            "Custom",
+            rect.x + 18.0 * scale,
+            rect.y + 25.0 * scale,
+            17.0 * scale,
+            Color::new(0.95, 0.9, 0.66, 1.0),
+        );
+        draw_text_line(
+            "canvas size",
+            rect.x + 18.0 * scale,
+            rect.y + 48.0 * scale,
+            12.0 * scale,
+            Color::new(0.58, 0.64, 0.72, 1.0),
+        );
+
+        self.draw_dimension_editor(CustomDimension::Width, "W", scale);
+        self.draw_dimension_editor(CustomDimension::Height, "H", scale);
+    }
+
+    fn draw_dimension_editor(&self, dimension: CustomDimension, label: &str, scale: f32) {
+        let field = custom_dimension_field_rect(dimension, scale);
+        let minus = custom_dimension_minus_rect(dimension, scale);
+        let plus = custom_dimension_plus_rect(dimension, scale);
+        let focused = self.setup.focused_dimension == Some(dimension);
+        let value = match dimension {
+            CustomDimension::Width => self.setup.custom_width_text.as_str(),
+            CustomDimension::Height => self.setup.custom_height_text.as_str(),
+        };
+        let border = if focused {
+            Color::new(1.0, 0.86, 0.38, 1.0)
+        } else if self.setup.use_custom {
+            Color::new(0.35, 0.9, 1.0, 0.72)
+        } else {
+            Color::new(0.38, 0.44, 0.55, 0.55)
+        };
+
+        draw_text_line(
+            label,
+            minus.x - 22.0 * scale,
+            field.y + 23.0 * scale,
+            14.0 * scale,
+            Color::new(0.62, 0.91, 1.0, 1.0),
+        );
+        draw_button(minus, "-", false, scale);
+        draw_rectangle(
+            field.x,
+            field.y,
+            field.w,
+            field.h,
+            Color::new(0.015, 0.018, 0.03, 0.9),
+        );
+        draw_rectangle_lines(field.x, field.y, field.w, field.h, 1.5, border);
+        let display = if value.is_empty() { "0" } else { value };
+        let size = (17.0 * scale) as u16;
+        let dims = measure_text(display, None, size, 1.0);
+        draw_text_ex(
+            display,
+            field.x + field.w * 0.5 - dims.width * 0.5,
+            field.y + field.h * 0.5 + dims.height * 0.35,
+            TextParams {
+                font_size: size,
+                color: Color::new(0.92, 0.97, 1.0, 1.0),
+                ..Default::default()
+            },
+        );
+        draw_button(plus, "+", true, scale);
     }
 
     fn draw_setup_preview(&self, rect: Rect, preset: CanvasPreset, background: CanvasBackground) {
@@ -604,12 +769,89 @@ impl App {
             .clamp(0.72, 1.18)
     }
 
+    fn select_preset(&mut self, index: usize) {
+        self.setup.preset_index = index.min(PRESETS.len() - 1);
+        self.setup.use_custom = false;
+        self.setup.focused_dimension = None;
+    }
+
+    fn selected_canvas_preset(&self) -> CanvasPreset {
+        if self.setup.use_custom {
+            CanvasPreset {
+                name: "Custom",
+                width: parse_canvas_size(&self.setup.custom_width_text),
+                height: parse_canvas_size(&self.setup.custom_height_text),
+                note: "custom size",
+            }
+        } else {
+            PRESETS[self.setup.preset_index]
+        }
+    }
+
+    fn focus_custom_dimension(&mut self, dimension: CustomDimension) {
+        self.setup.use_custom = true;
+        self.setup.focused_dimension = Some(dimension);
+    }
+
+    fn edit_custom_canvas_text(&mut self) {
+        let Some(dimension) = self.setup.focused_dimension else {
+            return;
+        };
+
+        while let Some(ch) = get_char_pressed() {
+            if ch.is_ascii_digit() {
+                let text = self.custom_dimension_text_mut(dimension);
+                if text.len() < 3 {
+                    if text == "0" {
+                        text.clear();
+                    }
+                    text.push(ch);
+                }
+            }
+        }
+
+        if is_key_pressed(KeyCode::Backspace) {
+            self.custom_dimension_text_mut(dimension).pop();
+        }
+        if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Escape) {
+            self.normalize_custom_canvas_size();
+            self.setup.focused_dimension = None;
+        }
+    }
+
+    fn adjust_custom_canvas_size(&mut self, dimension: CustomDimension, delta: i32) {
+        self.setup.use_custom = true;
+        self.setup.focused_dimension = None;
+        let current = match dimension {
+            CustomDimension::Width => parse_canvas_size(&self.setup.custom_width_text),
+            CustomDimension::Height => parse_canvas_size(&self.setup.custom_height_text),
+        };
+        let next = clamp_canvas_size((current as i32 + delta) as usize);
+        *self.custom_dimension_text_mut(dimension) = next.to_string();
+    }
+
+    fn normalize_custom_canvas_size(&mut self) {
+        let width = parse_canvas_size(&self.setup.custom_width_text);
+        let height = parse_canvas_size(&self.setup.custom_height_text);
+        self.setup.custom_width_text = width.to_string();
+        self.setup.custom_height_text = height.to_string();
+    }
+
+    fn custom_dimension_text_mut(&mut self, dimension: CustomDimension) -> &mut String {
+        match dimension {
+            CustomDimension::Width => &mut self.setup.custom_width_text,
+            CustomDimension::Height => &mut self.setup.custom_height_text,
+        }
+    }
+
     fn create_project_from_setup(&mut self) {
-        let preset = PRESETS[self.setup.preset_index];
+        self.normalize_custom_canvas_size();
+        let preset = self.selected_canvas_preset();
         self.width = preset.width;
         self.height = preset.height;
         self.background = self.setup.background;
         self.pixels = vec![self.background.pixel(); self.width * self.height];
+        self.reference = None;
         self.undo.clear();
         self.redo.clear();
         self.tool = Tool::Brush;
@@ -682,6 +924,12 @@ impl App {
                 return;
             }
         }
+        if is_mouse_button_down(MouseButton::Left)
+            && reference_opacity_slider_rect(layout).contains(mouse)
+        {
+            self.set_reference_opacity_from_mouse(layout, mouse.x);
+            return;
+        }
 
         let cell = canvas_cell(layout, mouse);
 
@@ -718,6 +966,10 @@ impl App {
         }
         if ctrl && is_key_pressed(KeyCode::S) {
             self.export_png();
+        }
+        if ctrl && is_key_pressed(KeyCode::O) {
+            self.import_reference_image();
+            return;
         }
 
         if !ctrl && is_key_pressed(KeyCode::B) {
@@ -792,6 +1044,19 @@ impl App {
     }
 
     fn handle_action_click(&mut self, layout: &Layout, mouse: Vec2) -> bool {
+        if reference_import_rect(layout).contains(mouse) {
+            self.import_reference_image();
+            return true;
+        }
+        if reference_clear_rect(layout).contains(mouse) {
+            self.reference = None;
+            self.flash("Reference cleared");
+            return true;
+        }
+        if reference_opacity_slider_rect(layout).contains(mouse) {
+            self.set_reference_opacity_from_mouse(layout, mouse.x);
+            return true;
+        }
         if brush_minus_rect(layout).contains(mouse) {
             self.change_brush_size(-1);
             return true;
@@ -1025,6 +1290,8 @@ impl App {
             }
         }
 
+        self.draw_reference_overlay(layout);
+
         if let Some((start, end)) = self.preview_drag(layout) {
             let cells = match self.tool {
                 Tool::Line => line_cells(start, end),
@@ -1092,6 +1359,75 @@ impl App {
         }
     }
 
+    fn draw_reference_overlay(&self, layout: &Layout) {
+        let Some(reference) = &self.reference else {
+            return;
+        };
+        if reference.width != self.width || reference.height != self.height {
+            return;
+        }
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let mut color = reference.pixel(x, y).color();
+                color.a *= self.reference_opacity;
+                if color.a <= 0.0 {
+                    continue;
+                }
+                draw_rectangle(
+                    layout.canvas.x + x as f32 * layout.cell,
+                    layout.canvas.y + y as f32 * layout.cell,
+                    layout.cell,
+                    layout.cell,
+                    color,
+                );
+            }
+        }
+    }
+
+    fn draw_reference_controls(&self, layout: &Layout) {
+        let scale = layout.ui_scale;
+        let title_y = layout.right.y + 234.0 * scale;
+        draw_section_label("REFERENCE", layout.right.x + 18.0 * scale, title_y, scale);
+
+        let import_rect = reference_import_rect(layout);
+        let clear_rect = reference_clear_rect(layout);
+        draw_button(import_rect, "Import Photo", self.reference.is_some(), scale);
+        draw_button(clear_rect, "Clear", false, scale);
+
+        let name = self
+            .reference
+            .as_ref()
+            .map(|reference| short_label(&reference.name, 24))
+            .unwrap_or_else(|| "No photo loaded".to_owned());
+        draw_text_line(
+            &name,
+            layout.right.x + 18.0 * scale,
+            layout.right.y + 296.0 * scale,
+            12.0 * scale,
+            Color::new(0.58, 0.64, 0.72, 1.0),
+        );
+
+        let slider = reference_opacity_slider_rect(layout);
+        let opacity = format!(
+            "Opacity {}%",
+            (self.reference_opacity * 100.0).round() as i32
+        );
+        draw_text_line(
+            &opacity,
+            slider.x,
+            slider.y - 7.0 * scale,
+            12.0 * scale,
+            Color::new(0.72, 0.84, 0.91, 1.0),
+        );
+        draw_slider(
+            slider,
+            self.reference_opacity,
+            self.reference.is_some(),
+            scale,
+        );
+    }
+
     fn draw_palette(&self, layout: &Layout) {
         let scale = layout.ui_scale;
         draw_section_label(
@@ -1120,11 +1456,13 @@ impl App {
             );
         }
 
+        self.draw_reference_controls(layout);
+
         let current_rect = Rect::new(
             layout.right.x + 18.0 * scale,
-            layout.right.y + 262.0 * scale,
+            layout.right.y + 352.0 * scale,
             layout.right.w - 36.0 * scale,
-            112.0 * scale,
+            86.0 * scale,
         );
         draw_rectangle(
             current_rect.x,
@@ -1151,8 +1489,8 @@ impl App {
         draw_rectangle(
             current_rect.x + current_rect.w - 58.0 * scale,
             current_rect.y + 16.0 * scale,
-            42.0 * scale,
-            42.0 * scale,
+            38.0 * scale,
+            38.0 * scale,
             self.current.color(),
         );
         draw_text_line(
@@ -1168,7 +1506,7 @@ impl App {
         draw_text_line(
             &format!("{} x {} px", self.width, self.height),
             current_rect.x + 14.0 * scale,
-            current_rect.y + 82.0 * scale,
+            current_rect.y + 74.0 * scale,
             14.0 * scale,
             Color::new(0.72, 0.84, 0.91, 1.0),
         );
@@ -1195,7 +1533,7 @@ impl App {
         let status = if get_time() < self.status_until {
             self.status.as_str()
         } else {
-            "Ctrl+S export  Ctrl+N new  Ctrl+Z undo  Shift fills shapes  [ ] brush"
+            "Ctrl+O photo  Ctrl+S export  Ctrl+N new  Ctrl+Z undo  [ ] brush"
         };
         let y = (layout.canvas.y + layout.canvas.h + 34.0 * scale).min(screen_height() - 18.0);
         let dims = measure_text(status, None, (15.0 * scale) as u16, 1.0);
@@ -1281,6 +1619,36 @@ impl App {
             Ok(()) => self.flash(&format!("Saved {path}")),
             Err(err) => self.flash(&format!("Export failed: {err}")),
         }
+    }
+
+    fn import_reference_image(&mut self) {
+        let Some(path) = FileDialog::new()
+            .add_filter("Images", &["png", "jpg", "jpeg"])
+            .pick_file()
+        else {
+            self.flash("Reference import cancelled");
+            return;
+        };
+
+        match load_reference_layer(&path, self.width, self.height) {
+            Ok(reference) => {
+                let name = reference.name.clone();
+                self.reference = Some(reference);
+                self.reference_opacity = self.reference_opacity.max(0.2);
+                self.flash(&format!("Reference loaded: {name}"));
+            }
+            Err(err) => self.flash(&format!("Reference failed: {err}")),
+        }
+    }
+
+    fn set_reference_opacity_from_mouse(&mut self, layout: &Layout, mouse_x: f32) {
+        let rect = reference_opacity_slider_rect(layout);
+        let value = ((mouse_x - rect.x) / rect.w).clamp(0.0, 1.0);
+        self.reference_opacity = value;
+        self.flash(&format!(
+            "Reference opacity {}%",
+            (value * 100.0).round() as i32
+        ));
     }
 
     fn paint_cell(&mut self, x: usize, y: usize) {
@@ -1535,6 +1903,36 @@ fn brush_plus_rect(layout: &Layout) -> Rect {
     )
 }
 
+fn reference_import_rect(layout: &Layout) -> Rect {
+    let scale = layout.ui_scale;
+    Rect::new(
+        layout.right.x + 18.0 * scale,
+        layout.right.y + 248.0 * scale,
+        144.0 * scale,
+        30.0 * scale,
+    )
+}
+
+fn reference_clear_rect(layout: &Layout) -> Rect {
+    let scale = layout.ui_scale;
+    Rect::new(
+        layout.right.x + layout.right.w - 86.0 * scale,
+        layout.right.y + 248.0 * scale,
+        68.0 * scale,
+        30.0 * scale,
+    )
+}
+
+fn reference_opacity_slider_rect(layout: &Layout) -> Rect {
+    let scale = layout.ui_scale;
+    Rect::new(
+        layout.right.x + 18.0 * scale,
+        layout.right.y + 324.0 * scale,
+        layout.right.w - 36.0 * scale,
+        24.0 * scale,
+    )
+}
+
 fn setup_panel_rect(scale: f32) -> Rect {
     let w = 900.0 * scale;
     let h = 560.0 * scale;
@@ -1558,6 +1956,64 @@ fn setup_preset_rect(index: usize, scale: f32) -> Rect {
         w,
         h,
     )
+}
+
+fn setup_custom_rect(scale: f32) -> Rect {
+    let panel = setup_panel_rect(scale);
+    Rect::new(
+        panel.x + 32.0 * scale,
+        panel.y + 296.0 * scale,
+        552.0 * scale,
+        58.0 * scale,
+    )
+}
+
+fn custom_dimension_field_rect(dimension: CustomDimension, scale: f32) -> Rect {
+    let rect = setup_custom_rect(scale);
+    let x = match dimension {
+        CustomDimension::Width => rect.x + 188.0 * scale,
+        CustomDimension::Height => rect.x + 382.0 * scale,
+    };
+    Rect::new(x, rect.y + 15.0 * scale, 58.0 * scale, 30.0 * scale)
+}
+
+fn custom_dimension_minus_rect(dimension: CustomDimension, scale: f32) -> Rect {
+    let field = custom_dimension_field_rect(dimension, scale);
+    Rect::new(field.x - 36.0 * scale, field.y, 30.0 * scale, field.h)
+}
+
+fn custom_dimension_plus_rect(dimension: CustomDimension, scale: f32) -> Rect {
+    let field = custom_dimension_field_rect(dimension, scale);
+    Rect::new(
+        field.x + field.w + 6.0 * scale,
+        field.y,
+        30.0 * scale,
+        field.h,
+    )
+}
+
+fn custom_width_field_rect(scale: f32) -> Rect {
+    custom_dimension_field_rect(CustomDimension::Width, scale)
+}
+
+fn custom_height_field_rect(scale: f32) -> Rect {
+    custom_dimension_field_rect(CustomDimension::Height, scale)
+}
+
+fn custom_width_minus_rect(scale: f32) -> Rect {
+    custom_dimension_minus_rect(CustomDimension::Width, scale)
+}
+
+fn custom_width_plus_rect(scale: f32) -> Rect {
+    custom_dimension_plus_rect(CustomDimension::Width, scale)
+}
+
+fn custom_height_minus_rect(scale: f32) -> Rect {
+    custom_dimension_minus_rect(CustomDimension::Height, scale)
+}
+
+fn custom_height_plus_rect(scale: f32) -> Rect {
+    custom_dimension_plus_rect(CustomDimension::Height, scale)
 }
 
 fn setup_background_rect(index: usize, scale: f32) -> Rect {
@@ -1588,6 +2044,58 @@ fn setup_create_rect(scale: f32) -> Rect {
         180.0 * scale,
         42.0 * scale,
     )
+}
+
+fn clamp_canvas_size(value: usize) -> usize {
+    value.clamp(MIN_CANVAS_SIZE, MAX_CANVAS_SIZE)
+}
+
+fn parse_canvas_size(text: &str) -> usize {
+    text.parse::<usize>()
+        .map(clamp_canvas_size)
+        .unwrap_or(DEFAULT_CUSTOM_CANVAS_SIZE)
+}
+
+fn load_reference_layer(
+    path: &Path,
+    canvas_width: usize,
+    canvas_height: usize,
+) -> Result<ReferenceLayer, String> {
+    let image = image::open(path).map_err(|err| err.to_string())?;
+    let scaled = image
+        .resize_exact(
+            canvas_width as u32,
+            canvas_height as u32,
+            FilterType::Triangle,
+        )
+        .to_rgba8();
+    let pixels = scaled
+        .pixels()
+        .map(|pixel| Pixel::rgba(pixel[0], pixel[1], pixel[2], pixel[3]))
+        .collect();
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("reference image")
+        .to_owned();
+
+    Ok(ReferenceLayer {
+        name,
+        width: canvas_width,
+        height: canvas_height,
+        pixels,
+    })
+}
+
+fn short_label(label: &str, max_chars: usize) -> String {
+    if label.chars().count() <= max_chars {
+        return label.to_owned();
+    }
+
+    let keep = max_chars.saturating_sub(3);
+    let mut shortened: String = label.chars().take(keep).collect();
+    shortened.push_str("...");
+    shortened
 }
 
 fn line_cells(start: (usize, usize), end: (usize, usize)) -> Vec<(usize, usize)> {
@@ -1858,6 +2366,37 @@ fn draw_button(rect: Rect, label: &str, primary: bool, scale: f32) {
             },
             ..Default::default()
         },
+    );
+}
+
+fn draw_slider(rect: Rect, value: f32, enabled: bool, scale: f32) {
+    let value = value.clamp(0.0, 1.0);
+    let track_h = (5.0 * scale).max(3.0);
+    let track_y = rect.y + rect.h * 0.5 - track_h * 0.5;
+    let accent = if enabled {
+        Color::new(0.35, 0.9, 1.0, 1.0)
+    } else {
+        Color::new(0.35, 0.4, 0.5, 1.0)
+    };
+
+    draw_rectangle(
+        rect.x,
+        track_y,
+        rect.w,
+        track_h,
+        Color::new(0.015, 0.018, 0.03, 0.95),
+    );
+    draw_rectangle(rect.x, track_y, rect.w * value, track_h, fade(accent, 0.82));
+    draw_rectangle_lines(rect.x, track_y, rect.w, track_h, 1.0, fade(accent, 0.45));
+
+    let knob_x = rect.x + rect.w * value;
+    draw_circle(knob_x, rect.y + rect.h * 0.5, 7.0 * scale, accent);
+    draw_circle_lines(
+        knob_x,
+        rect.y + rect.h * 0.5,
+        7.0 * scale,
+        1.0,
+        fade(WHITE, 0.7),
     );
 }
 
