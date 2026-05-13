@@ -628,45 +628,43 @@ impl App {
             return;
         }
 
-        let fur = Pixel::rgb(244, 153, 76);
-        let fur_shadow = Pixel::rgb(202, 96, 48);
-        let cream = Pixel::rgb(255, 224, 166);
-        let outline = Pixel::rgb(54, 34, 38);
-        let eye = Pixel::rgb(30, 28, 38);
-        let pink = Pixel::rgb(255, 132, 160);
-        let shine = Pixel::rgb(255, 240, 190);
+        const CAT: &[&str] = &[
+            "........................................",
+            "............xxx............xxx..........",
+            "...........xppx..........xppx...........",
+            "..........xpooxx........xxoopx..........",
+            ".........xpooooxxxxxxxxxxoooopx.........",
+            "........xpoooooooooooooooooooopx........",
+            ".......xoooooooooooooooooooooooox.......",
+            "......xoooosooooosooooosoooooooox.......",
+            ".....xoooosoooooosoooooosoooooooox......",
+            "....xooooooooooooooooooooooooooooox.....",
+            "...xoooooooeeeoooooooeeeoooooooox.......",
+            "...xooooooeeweoooooeeweooooooooox.......",
+            "...xooooooeeeeooocooeeeeooooooooox......",
+            "...xooooooooooocccccoooooooooooox.......",
+            "xxxxxxooooopoooocpcccoooopooooxxxxxx....",
+            "...xoooooopoooocccccoooopooooox.........",
+            "....xoooooopoooocccoooopooooox..........",
+            ".....xooooooopppppppppoooooox...........",
+            "......xxooooooooooooooooooxx............",
+            "........xxxxoooooooooxxxx...............",
+            ".....xxxxxxoooooooooooxxxxxx............",
+            "...xxoooooooooooooooooooooooxx..........",
+            "..xoooooooooooocccoooooooooooox.........",
+            ".xoooooooooooocccccccoooooooooox........",
+            ".xooooooooooocccccccccooooooooox........",
+            ".xoooooooosooocccccccooosoooooox........",
+            "xoooooooosssoooooooooossssoooooox.......",
+            "xooooooossssoooooooooossssoooooox.......",
+            ".xoooooooooooooooooooooooooooooox.......",
+            "..xoooooooooooooooooooooooooooox........",
+            "...xxooooooxxxxxxxxxoooooooxx...........",
+            ".....xxxxxx.........xxxxxx..............",
+            "........................................",
+        ];
 
-        self.fill_ellipse_ratio(0.50, 0.62, 0.19, 0.25, fur_shadow);
-        self.fill_ellipse_ratio(0.50, 0.61, 0.16, 0.22, fur);
-        self.fill_ellipse_ratio(0.29, 0.66, 0.10, 0.07, fur_shadow);
-        self.fill_ellipse_ratio(0.22, 0.62, 0.11, 0.055, fur);
-
-        self.fill_triangle_ratio((0.31, 0.34), (0.39, 0.11), (0.46, 0.36), outline);
-        self.fill_triangle_ratio((0.54, 0.36), (0.61, 0.11), (0.69, 0.34), outline);
-        self.fill_triangle_ratio((0.34, 0.34), (0.40, 0.17), (0.45, 0.36), fur);
-        self.fill_triangle_ratio((0.55, 0.36), (0.60, 0.17), (0.66, 0.34), fur);
-        self.fill_triangle_ratio((0.37, 0.32), (0.40, 0.22), (0.43, 0.34), pink);
-        self.fill_triangle_ratio((0.57, 0.34), (0.60, 0.22), (0.63, 0.32), pink);
-
-        self.fill_ellipse_ratio(0.50, 0.42, 0.23, 0.20, outline);
-        self.fill_ellipse_ratio(0.50, 0.41, 0.20, 0.18, fur);
-        self.fill_ellipse_ratio(0.50, 0.49, 0.12, 0.08, cream);
-        self.fill_ellipse_ratio(0.41, 0.43, 0.035, 0.043, eye);
-        self.fill_ellipse_ratio(0.59, 0.43, 0.035, 0.043, eye);
-        self.fill_ellipse_ratio(0.425, 0.415, 0.010, 0.012, shine);
-        self.fill_ellipse_ratio(0.575, 0.415, 0.010, 0.012, shine);
-        self.fill_triangle_ratio((0.48, 0.49), (0.52, 0.49), (0.50, 0.535), pink);
-        self.draw_line_ratio((0.50, 0.535), (0.50, 0.565), outline, 1);
-        self.draw_line_ratio((0.39, 0.53), (0.24, 0.49), outline, 1);
-        self.draw_line_ratio((0.39, 0.56), (0.25, 0.58), outline, 1);
-        self.draw_line_ratio((0.61, 0.53), (0.76, 0.49), outline, 1);
-        self.draw_line_ratio((0.61, 0.56), (0.75, 0.58), outline, 1);
-
-        self.draw_line_ratio((0.43, 0.25), (0.46, 0.35), fur_shadow, 1);
-        self.draw_line_ratio((0.50, 0.23), (0.50, 0.34), fur_shadow, 1);
-        self.draw_line_ratio((0.57, 0.25), (0.54, 0.35), fur_shadow, 1);
-        self.fill_ellipse_ratio(0.35, 0.50, 0.035, 0.022, Pixel::rgb(255, 170, 142));
-        self.fill_ellipse_ratio(0.65, 0.50, 0.035, 0.022, Pixel::rgb(255, 170, 142));
+        self.stamp_sprite(CAT);
     }
 
     fn update_editor(&mut self, layout: &Layout) {
@@ -1442,67 +1440,36 @@ impl App {
         self.flash(&format!("Brush {}px", self.brush_size));
     }
 
-    fn fill_ellipse_ratio(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, color: Pixel) {
-        let center_x = cx * (self.width.saturating_sub(1)) as f32;
-        let center_y = cy * (self.height.saturating_sub(1)) as f32;
-        let radius_x = (rx * self.width as f32).max(1.0);
-        let radius_y = (ry * self.height as f32).max(1.0);
-        let min_x = (center_x - radius_x).floor().max(0.0) as usize;
-        let max_x = (center_x + radius_x).ceil().min((self.width - 1) as f32) as usize;
-        let min_y = (center_y - radius_y).floor().max(0.0) as usize;
-        let max_y = (center_y + radius_y).ceil().min((self.height - 1) as f32) as usize;
+    fn stamp_sprite(&mut self, rows: &[&str]) {
+        let sprite_w = rows.iter().map(|row| row.len()).max().unwrap_or(1);
+        let sprite_h = rows.len().max(1);
+        let scale = (self.width as f32 * 0.86 / sprite_w as f32)
+            .min(self.height as f32 * 0.9 / sprite_h as f32)
+            .max(0.35);
+        let draw_w = sprite_w as f32 * scale;
+        let draw_h = sprite_h as f32 * scale;
+        let offset_x = (self.width as f32 - draw_w) * 0.5;
+        let offset_y = (self.height as f32 - draw_h) * 0.5;
 
-        for y in min_y..=max_y {
-            for x in min_x..=max_x {
-                let nx = (x as f32 - center_x) / radius_x;
-                let ny = (y as f32 - center_y) / radius_y;
-                if nx * nx + ny * ny <= 1.0 {
-                    self.set_raw(x, y, color);
-                }
-            }
-        }
-    }
+        for (row, line) in rows.iter().enumerate() {
+            for (col, marker) in line.chars().enumerate() {
+                let Some(color) = sprite_pixel(marker) else {
+                    continue;
+                };
 
-    fn fill_triangle_ratio(&mut self, a: (f32, f32), b: (f32, f32), c: (f32, f32), color: Pixel) {
-        let ax = a.0 * (self.width.saturating_sub(1)) as f32;
-        let ay = a.1 * (self.height.saturating_sub(1)) as f32;
-        let bx = b.0 * (self.width.saturating_sub(1)) as f32;
-        let by = b.1 * (self.height.saturating_sub(1)) as f32;
-        let cx = c.0 * (self.width.saturating_sub(1)) as f32;
-        let cy = c.1 * (self.height.saturating_sub(1)) as f32;
-        let min_x = ax.min(bx).min(cx).floor().max(0.0) as usize;
-        let max_x = ax.max(bx).max(cx).ceil().min((self.width - 1) as f32) as usize;
-        let min_y = ay.min(by).min(cy).floor().max(0.0) as usize;
-        let max_y = ay.max(by).max(cy).ceil().min((self.height - 1) as f32) as usize;
+                let x0 = (offset_x + col as f32 * scale).floor().max(0.0) as usize;
+                let x1 = (offset_x + (col + 1) as f32 * scale)
+                    .ceil()
+                    .min(self.width as f32) as usize;
+                let y0 = (offset_y + row as f32 * scale).floor().max(0.0) as usize;
+                let y1 = (offset_y + (row + 1) as f32 * scale)
+                    .ceil()
+                    .min(self.height as f32) as usize;
 
-        for y in min_y..=max_y {
-            for x in min_x..=max_x {
-                if point_in_triangle(x as f32 + 0.5, y as f32 + 0.5, (ax, ay), (bx, by), (cx, cy)) {
-                    self.set_raw(x, y, color);
-                }
-            }
-        }
-    }
-
-    fn draw_line_ratio(&mut self, start: (f32, f32), end: (f32, f32), color: Pixel, size: usize) {
-        let sx = (start.0 * (self.width.saturating_sub(1)) as f32).round() as usize;
-        let sy = (start.1 * (self.height.saturating_sub(1)) as f32).round() as usize;
-        let ex = (end.0 * (self.width.saturating_sub(1)) as f32).round() as usize;
-        let ey = (end.1 * (self.height.saturating_sub(1)) as f32).round() as usize;
-
-        for (x, y) in line_cells((sx, sy), (ex, ey)) {
-            self.stamp_square(x, y, size, color);
-        }
-    }
-
-    fn stamp_square(&mut self, x: usize, y: usize, size: usize, color: Pixel) {
-        let anchor = size as i32 / 2;
-        for oy in 0..size as i32 {
-            for ox in 0..size as i32 {
-                let nx = x as i32 + ox - anchor;
-                let ny = y as i32 + oy - anchor;
-                if nx >= 0 && ny >= 0 {
-                    self.set_raw(nx as usize, ny as usize, color);
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        self.set_raw(x, y, color);
+                    }
                 }
             }
         }
@@ -1706,15 +1673,17 @@ fn pseudo_hash(mut value: i32) -> i32 {
     value.abs()
 }
 
-fn point_in_triangle(px: f32, py: f32, a: (f32, f32), b: (f32, f32), c: (f32, f32)) -> bool {
-    let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
-    if area.abs() < f32::EPSILON {
-        return false;
+fn sprite_pixel(marker: char) -> Option<Pixel> {
+    match marker {
+        'x' => Some(Pixel::rgb(54, 34, 38)),
+        'o' => Some(Pixel::rgb(244, 153, 76)),
+        's' => Some(Pixel::rgb(202, 96, 48)),
+        'c' => Some(Pixel::rgb(255, 224, 166)),
+        'p' => Some(Pixel::rgb(255, 132, 160)),
+        'e' => Some(Pixel::rgb(30, 28, 38)),
+        'w' => Some(Pixel::rgb(255, 240, 190)),
+        _ => None,
     }
-    let s = ((a.1 - c.1) * (px - c.0) + (c.0 - a.0) * (py - c.1)) / area;
-    let t = ((c.1 - b.1) * (px - c.0) + (b.0 - c.0) * (py - c.1)) / area;
-    let u = 1.0 - s - t;
-    s >= 0.0 && t >= 0.0 && u >= 0.0
 }
 
 fn checker_color(x: usize, y: usize, background: CanvasBackground) -> Color {
